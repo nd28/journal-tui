@@ -24,6 +24,9 @@ type Model struct {
 	store  *store.Store
 	stats  store.Stats
 
+	width  int
+	height int
+
 	homeCursor int
 
 	writing writingState
@@ -46,6 +49,11 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if sizeMsg, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = sizeMsg.Width
+		m.height = sizeMsg.Height
+	}
+
 	switch m.screen {
 	case screenHome:
 		return m.updateHome(msg)

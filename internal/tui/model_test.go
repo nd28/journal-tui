@@ -70,3 +70,12 @@ func TestViewIncludesVersionFooter(t *testing.T) {
 		t.Fatalf("expected view to contain version footer %q, got %q", "journal v"+Version, view)
 	}
 }
+
+func TestWindowSizeMsgUpdatesModelDimensions(t *testing.T) {
+	m := Model{screen: screenHome}
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	hm := updated.(Model)
+	if hm.width != 120 || hm.height != 40 {
+		t.Fatalf("expected width=120 height=40, got width=%d height=%d", hm.width, hm.height)
+	}
+}
