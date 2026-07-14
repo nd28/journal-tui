@@ -6,6 +6,8 @@ import (
 	"journal/internal/store"
 )
 
+const Version = "0.1.0"
+
 type screen int
 
 const (
@@ -72,5 +74,6 @@ func (m Model) View() string {
 	if m.err != nil {
 		body += "\n" + errorStyle.Render("Error: "+m.err.Error())
 	}
+	body += "\n" + statStyle.Render("journal v"+Version)
 	return body
 }

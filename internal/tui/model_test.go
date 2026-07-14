@@ -62,3 +62,11 @@ func TestHomeQuitReturnsQuitMsg(t *testing.T) {
 		t.Fatalf("expected tea.QuitMsg, got %T", msg)
 	}
 }
+
+func TestViewIncludesVersionFooter(t *testing.T) {
+	m := Model{screen: screenHome}
+	view := m.View()
+	if !strings.Contains(view, "journal v"+Version) {
+		t.Fatalf("expected view to contain version footer %q, got %q", "journal v"+Version, view)
+	}
+}
