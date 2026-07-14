@@ -35,7 +35,7 @@ func (m Model) updateHome(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "New Session":
 			return m.startWritingSession()
 		case "History":
-			return m, nil // wired up in Task 7
+			return m.enterHistory()
 		case "Quit":
 			return m, tea.Quit
 		}
