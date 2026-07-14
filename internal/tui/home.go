@@ -33,7 +33,7 @@ func (m Model) updateHome(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "enter":
 		switch homeMenuItems[m.homeCursor] {
 		case "New Session":
-			return m, nil // wired up in Task 6
+			return m.startWritingSession()
 		case "History":
 			return m, nil // wired up in Task 7
 		case "Quit":
