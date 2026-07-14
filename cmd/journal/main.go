@@ -19,7 +19,7 @@ func main() {
 	}
 
 	dbDir := filepath.Join(home, ".journal")
-	if err := os.MkdirAll(dbDir, 0o755); err != nil {
+	if err := os.MkdirAll(dbDir, 0o700); err != nil {
 		fmt.Fprintln(os.Stderr, "journal: could not create data directory:", err)
 		os.Exit(1)
 	}
