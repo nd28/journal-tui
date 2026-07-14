@@ -1,10 +1,23 @@
 package tui
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+func TestViewIncludesErrorWhenPresent(t *testing.T) {
+	m := Model{screen: screenHome, err: errors.New("boom")}
+	view := m.View()
+	if !strings.Contains(view, "boom") {
+		t.Fatalf("expected view to contain error text %q, got %q", "boom", view)
+	}
+	if !strings.Contains(view, "Error:") {
+		t.Fatalf("expected view to contain %q, got %q", "Error:", view)
+	}
+}
 
 func TestHomeCursorMovesDownAndUp(t *testing.T) {
 	m := Model{screen: screenHome}

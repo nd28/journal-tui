@@ -12,6 +12,7 @@ var (
 	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 	statStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
+	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
 )
 
 var homeMenuItems = []string{"New Session", "History", "Quit"}

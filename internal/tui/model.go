@@ -58,15 +58,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	var body string
 	switch m.screen {
 	case screenHome:
-		return m.viewHome()
+		body = m.viewHome()
 	case screenWriting:
-		return m.viewWriting()
+		body = m.viewWriting()
 	case screenSummary:
-		return m.viewSummary()
+		body = m.viewSummary()
 	case screenHistory:
-		return m.viewHistory()
+		body = m.viewHistory()
 	}
-	return ""
+	if m.err != nil {
+		body += "\n" + errorStyle.Render("Error: "+m.err.Error())
+	}
+	return body
 }
