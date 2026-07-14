@@ -109,10 +109,16 @@ func (m Model) endWritingSession() (tea.Model, tea.Cmd) {
 		}
 	}
 
+	totalWords := m.writing.session.TotalWords()
+	if totalWords == 0 {
+		m.screen = screenHome
+		m.homeCursor = 0
+		return m, nil
+	}
+
 	raw := m.writing.session.RawScore()
 	bonus := scoring.StreakBonus(m.writing.streakDays)
 	final := scoring.FinalScore(raw, m.writing.streakDays)
-	totalWords := m.writing.session.TotalWords()
 
 	stats, isNewHigh, err := m.store.FinishSession(m.writing.sessionID, time.Now(), final, bonus, m.writing.streakDays, m.writing.entryDate)
 	if err != nil {

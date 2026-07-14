@@ -93,3 +93,42 @@ func TestEndWritingSessionPersistsAndUpdatesStats(t *testing.T) {
 		t.Fatal("expected the first session to be a new high score")
 	}
 }
+
+func TestEndWritingSessionWithNoWordsSkipsPersistence(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	updated, _ := m.startWritingSession()
+	m = updated.(Model)
+	if m.screen != screenWriting {
+		t.Fatalf("expected screenWriting, got %v", m.screen)
+	}
+
+	// No typing happens: end the session immediately.
+	updated, _ = m.endWritingSession()
+	m = updated.(Model)
+
+	if m.screen != screenHome {
+		t.Fatalf("expected screenHome for a zero-word session, got %v", m.screen)
+	}
+
+	stats, err := m.store.GetStats()
+	if err != nil {
+		t.Fatalf("GetStats: %v", err)
+	}
+	if stats.LifetimeScore != 0 {
+		t.Fatalf("expected LifetimeScore to remain 0, got %d", stats.LifetimeScore)
+	}
+	if stats.CurrentStreak != 0 {
+		t.Fatalf("expected CurrentStreak to remain 0, got %d", stats.CurrentStreak)
+	}
+}
