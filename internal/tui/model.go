@@ -15,6 +15,7 @@ const (
 	screenWriting
 	screenSummary
 	screenHistory
+	screenRead
 )
 
 // Model is the root Bubble Tea model. It holds the current screen plus
@@ -33,6 +34,7 @@ type Model struct {
 	writing writingState
 	summary summaryState
 	history historyState
+	read    readState
 
 	err error
 }
@@ -64,6 +66,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSummary(msg)
 	case screenHistory:
 		return m.updateHistory(msg)
+	case screenRead:
+		return m.updateRead(msg)
 	}
 	return m, nil
 }
@@ -79,6 +83,8 @@ func (m Model) View() string {
 		body = m.viewSummary()
 	case screenHistory:
 		body = m.viewHistory()
+	case screenRead:
+		body = m.viewRead()
 	}
 	if m.err != nil {
 		body += "\n" + errorStyle.Render("Error: "+m.err.Error())

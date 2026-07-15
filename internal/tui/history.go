@@ -69,6 +69,11 @@ func (m Model) updateHistory(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screenHome
 		m.homeCursor = 0
 		return m, nil
+	case tea.KeyEnter:
+		if len(m.history.results) == 0 {
+			return m, nil
+		}
+		return m.enterRead(m.history.results[m.history.cursor].ID)
 	case tea.KeyUp:
 		if m.history.cursor > 0 {
 			m.history.cursor--
