@@ -73,7 +73,7 @@ func (m Model) updateHistory(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.history.results) == 0 {
 			return m, nil
 		}
-		return m.enterRead(m.history.results[m.history.cursor].ID)
+		return m.enterRead(m.history.results[m.history.cursor])
 	case tea.KeyUp:
 		if m.history.cursor > 0 {
 			m.history.cursor--
@@ -122,7 +122,12 @@ func (m Model) viewHistory() string {
 			cursor = "> "
 			style = selectedStyle
 		}
-		b.WriteString(cursor + style.Render(fmt.Sprintf("%s   score %d   %d words", r.StartedAt, r.SessionScore, r.WordCount)) + "\n")
+		b.WriteString(cursor + style.Render(fmt.Sprintf(
+			"%s   Score: %s   %s",
+			formatSessionDate(r.StartedAt),
+			formatNumber(r.SessionScore),
+			formatCount(r.WordCount, "word", "words"),
+		)) + "\n")
 		if r.Snippet != "" {
 			b.WriteString("    " + statStyle.Render(r.Snippet) + "\n")
 		}

@@ -49,9 +49,9 @@ func (m Model) updateHome(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) viewHome() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Journal") + "\n\n")
-	b.WriteString(statStyle.Render(fmt.Sprintf("Lifetime score: %d", m.stats.LifetimeScore)) + "\n")
-	b.WriteString(statStyle.Render(fmt.Sprintf("Best session:   %d", m.stats.HighSessionScore)) + "\n")
-	b.WriteString(statStyle.Render(fmt.Sprintf("Streak:         %d days", m.stats.CurrentStreak)) + "\n\n")
+	b.WriteString(statStyle.Render(fmt.Sprintf("Lifetime score: %s", formatNumber(m.stats.LifetimeScore))) + "\n")
+	b.WriteString(statStyle.Render(fmt.Sprintf("Best session:   %s", formatNumber(m.stats.HighSessionScore))) + "\n")
+	b.WriteString(statStyle.Render(fmt.Sprintf("Streak:         %s", formatCount(m.stats.CurrentStreak, "day", "days"))) + "\n\n")
 
 	for i, item := range homeMenuItems {
 		cursor := "  "

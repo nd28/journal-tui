@@ -36,11 +36,11 @@ func (m Model) viewSummary() string {
 	if m.summary.isNewHigh {
 		b.WriteString(selectedStyle.Render("*** NEW HIGH SCORE ***") + "\n\n")
 	}
-	b.WriteString(statStyle.Render(fmt.Sprintf("Words typed:    %d", m.summary.totalWords)) + "\n")
-	b.WriteString(statStyle.Render(fmt.Sprintf("Raw score:      %d", m.summary.rawScore)) + "\n")
+	b.WriteString(statStyle.Render(fmt.Sprintf("Words typed:    %s", formatNumber(m.summary.totalWords))) + "\n")
+	b.WriteString(statStyle.Render(fmt.Sprintf("Raw score:      %s", formatNumber(m.summary.rawScore))) + "\n")
 	b.WriteString(statStyle.Render(fmt.Sprintf("Streak bonus:   +%.0f%%", (m.summary.bonus-1)*100)) + "\n")
-	b.WriteString(statStyle.Render(fmt.Sprintf("Session score:  %d", m.summary.finalScore)) + "\n")
-	b.WriteString(statStyle.Render(fmt.Sprintf("Lifetime score: %d", m.stats.LifetimeScore)) + "\n\n")
+	b.WriteString(statStyle.Render(fmt.Sprintf("Session score:  %s", formatNumber(m.summary.finalScore))) + "\n")
+	b.WriteString(statStyle.Render(fmt.Sprintf("Lifetime score: %s", formatNumber(m.stats.LifetimeScore))) + "\n\n")
 	b.WriteString(statStyle.Render("enter: back to home") + "\n")
 	return b.String()
 }

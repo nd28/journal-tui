@@ -241,9 +241,9 @@ func (m Model) updateWriting(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) viewWriting() string {
 	combo := m.writing.session.Combo
 	header := fmt.Sprintf(
-		"Score: %d   Words: %d   %s",
-		m.writing.session.RawScore(),
-		m.writing.session.TotalWords(),
+		"Score: %s   Words: %s   %s",
+		formatNumber(m.writing.session.RawScore()),
+		formatNumber(m.writing.session.TotalWords()),
 		renderComboBar(combo.Multiplier, 20),
 	)
 	help := statStyle.Render("ctrl+n: new entry   ctrl+t: toggle size   esc: end session")
