@@ -20,6 +20,7 @@ type writingState struct {
 	startedAt     time.Time
 	streakDays    int
 	entryDate     string
+	pasteWarning  string
 }
 
 const (
@@ -204,6 +205,12 @@ func (m Model) updateWriting(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if keyMsg.Paste {
+			m.writing.pasteWarning = "paste disabled — write it yourself"
+			return m, nil
+		}
+		m.writing.pasteWarning = ""
+
 		switch keyMsg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
@@ -240,5 +247,9 @@ func (m Model) viewWriting() string {
 		renderComboBar(combo.Multiplier, 20),
 	)
 	help := statStyle.Render("ctrl+n: new entry   ctrl+t: toggle size   esc: end session")
-	return titleStyle.Render(header) + "\n\n" + m.writing.textarea.View() + "\n\n" + help
+	view := titleStyle.Render(header) + "\n\n" + m.writing.textarea.View() + "\n\n" + help
+	if m.writing.pasteWarning != "" {
+		view += "\n" + errorStyle.Render(m.writing.pasteWarning)
+	}
+	return view
 }

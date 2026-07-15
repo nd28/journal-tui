@@ -241,3 +241,67 @@ func TestWindowSizeMsgResizesActiveTextarea(t *testing.T) {
 		t.Fatalf("expected resized height %d, got %d", 20-writingChromeLines-writingHeightMargin, got)
 	}
 }
+
+func TestPasteIsBlockedAndWarns(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	m.width, m.height = 120, 40
+
+	updated, _ := m.startWritingSession()
+	m = updated.(Model)
+
+	updated, _ = m.updateWriting(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("pasted text"), Paste: true})
+	m = updated.(Model)
+
+	if m.writing.textarea.Value() != "" {
+		t.Fatalf("expected pasted text to be blocked, got textarea value %q", m.writing.textarea.Value())
+	}
+	if m.writing.pasteWarning == "" {
+		t.Fatal("expected a paste warning to be set")
+	}
+	if !strings.Contains(m.viewWriting(), m.writing.pasteWarning) {
+		t.Fatalf("expected viewWriting to render the paste warning %q", m.writing.pasteWarning)
+	}
+}
+
+func TestPasteWarningClearsOnNextNormalKey(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	m.width, m.height = 120, 40
+
+	updated, _ := m.startWritingSession()
+	m = updated.(Model)
+
+	updated, _ = m.updateWriting(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x"), Paste: true})
+	m = updated.(Model)
+	if m.writing.pasteWarning == "" {
+		t.Fatal("expected a paste warning to be set")
+	}
+
+	updated, _ = m.updateWriting(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	m = updated.(Model)
+	if m.writing.pasteWarning != "" {
+		t.Fatalf("expected paste warning to clear after a normal key, got %q", m.writing.pasteWarning)
+	}
+	if m.writing.textarea.Value() != "h" {
+		t.Fatalf("expected normal key to reach the textarea, got %q", m.writing.textarea.Value())
+	}
+}
