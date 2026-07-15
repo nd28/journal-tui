@@ -1,6 +1,9 @@
 package store
 
-import "time"
+import (
+	"database/sql"
+	"time"
+)
 
 type SessionRecord struct {
 	ID           int64
@@ -122,4 +125,100 @@ func ComputeStreak(lastEntryDate, today string, currentStreak int) int {
 		return currentStreak + 1
 	}
 	return 1
+}
+
+type SessionSearchResult struct {
+	SessionRecord
+	Snippet string
+}
+
+// SearchSessions returns finished sessions whose entry text matches query
+// (case-insensitive substring), most recent first, paginated by limit/offset.
+// An empty query matches every entry via SQL's `LIKE '%%'`, so the same
+// query shape handles both plain browsing and searching. total is the
+// number of matching sessions across all pages.
+func (s *Store) SearchSessions(query string, limit, offset int) ([]SessionSearchResult, int, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			s.id,
+			s.started_at,
+			s.session_score,
+			COALESCE((SELECT SUM(e.word_count) FROM entries e WHERE e.session_id = s.id), 0),
+			(SELECT e.body FROM entries e WHERE e.session_id = s.id AND e.body LIKE '%' || ? || '%' ORDER BY e.created_at ASC LIMIT 1)
+		FROM sessions s
+		WHERE s.ended_at IS NOT NULL
+		  AND EXISTS (SELECT 1 FROM entries e WHERE e.session_id = s.id AND e.body LIKE '%' || ? || '%')
+		ORDER BY s.started_at DESC
+		LIMIT ? OFFSET ?`, query, query, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var out []SessionSearchResult
+	for rows.Next() {
+		var r SessionSearchResult
+		var snippet sql.NullString
+		if err := rows.Scan(&r.ID, &r.StartedAt, &r.SessionScore, &r.WordCount, &snippet); err != nil {
+			return nil, 0, err
+		}
+		if query != "" && snippet.Valid {
+			r.Snippet = truncateSnippet(snippet.String)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	var total int
+	row := s.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM sessions s
+		WHERE s.ended_at IS NOT NULL
+		  AND EXISTS (SELECT 1 FROM entries e WHERE e.session_id = s.id AND e.body LIKE '%' || ? || '%')`, query)
+	if err := row.Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	return out, total, nil
+}
+
+func truncateSnippet(body string) string {
+	const maxLen = 60
+	r := []rune(body)
+	if len(r) <= maxLen {
+		return body
+	}
+	return string(r[:maxLen]) + "..."
+}
+
+type EntryRecord struct {
+	ID        int64
+	CreatedAt string
+	Body      string
+	WordCount int
+}
+
+// GetEntries returns a session's entries ordered by created_at ASC — the
+// order they were written in.
+func (s *Store) GetEntries(sessionID int64) ([]EntryRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT id, created_at, body, word_count FROM entries WHERE session_id = ? ORDER BY created_at ASC`,
+		sessionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []EntryRecord
+	for rows.Next() {
+		var r EntryRecord
+		if err := rows.Scan(&r.ID, &r.CreatedAt, &r.Body, &r.WordCount); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
