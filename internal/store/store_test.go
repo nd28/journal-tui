@@ -83,49 +83,6 @@ func TestFinishSessionUpdatesStatsAndReportsNewHigh(t *testing.T) {
 	}
 }
 
-func TestListSessionsOrdersMostRecentFirst(t *testing.T) {
-	s := openTestStore(t)
-	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	today := base.Format("2006-01-02")
-
-	id1, err := s.StartSession(base)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	if err := s.SaveEntry(id1, base, "hello world", 2); err != nil {
-		t.Fatalf("SaveEntry: %v", err)
-	}
-	if _, _, err := s.FinishSession(id1, base, 20, 1.0, 1, today); err != nil {
-		t.Fatalf("FinishSession: %v", err)
-	}
-
-	later := base.Add(time.Hour)
-	id2, err := s.StartSession(later)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	if err := s.SaveEntry(id2, later, "a b c", 3); err != nil {
-		t.Fatalf("SaveEntry: %v", err)
-	}
-	if _, _, err := s.FinishSession(id2, later, 30, 1.0, 1, today); err != nil {
-		t.Fatalf("FinishSession: %v", err)
-	}
-
-	records, err := s.ListSessions(10)
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	if len(records) != 2 {
-		t.Fatalf("expected 2 sessions, got %d", len(records))
-	}
-	if records[0].ID != id2 {
-		t.Fatalf("expected the most recent session (%d) first, got %d", id2, records[0].ID)
-	}
-	if records[0].WordCount != 3 {
-		t.Fatalf("expected 3 words for the latest session, got %d", records[0].WordCount)
-	}
-}
-
 func TestComputeStreakFirstEverEntry(t *testing.T) {
 	if got := ComputeStreak("", "2026-07-14", 0); got != 1 {
 		t.Fatalf("ComputeStreak first entry = %d, want 1", got)

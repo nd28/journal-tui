@@ -77,31 +77,6 @@ func (s *Store) FinishSession(sessionID int64, endedAt time.Time, sessionScore i
 	return stats, isNewHigh, nil
 }
 
-func (s *Store) ListSessions(limit int) ([]SessionRecord, error) {
-	rows, err := s.db.Query(`
-		SELECT s.id, s.started_at, s.session_score, COALESCE(SUM(e.word_count), 0)
-		FROM sessions s
-		LEFT JOIN entries e ON e.session_id = s.id
-		WHERE s.ended_at IS NOT NULL
-		GROUP BY s.id
-		ORDER BY s.started_at DESC
-		LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []SessionRecord
-	for rows.Next() {
-		var r SessionRecord
-		if err := rows.Scan(&r.ID, &r.StartedAt, &r.SessionScore, &r.WordCount); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
 // ComputeStreak returns the consecutive-day streak for a session written on
 // `today`, given the last entry date and streak recorded in stats. Pure and
 // DB-free: same day returns the current streak unchanged, the day after
