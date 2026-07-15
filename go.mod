@@ -1,4 +1,4 @@
-module journal
+module github.com/nd28/journal-tui
 
 go 1.25.0
 

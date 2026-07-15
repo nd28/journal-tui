@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"journal/internal/scoring"
-	"journal/internal/store"
+	"github.com/nd28/journal-tui/internal/scoring"
+	"github.com/nd28/journal-tui/internal/store"
 )
 
 type writingState struct {

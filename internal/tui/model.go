@@ -3,7 +3,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"journal/internal/store"
+	"github.com/nd28/journal-tui/internal/store"
 )
 
 const Version = "0.1.0"

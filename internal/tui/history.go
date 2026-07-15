@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"journal/internal/store"
+	"github.com/nd28/journal-tui/internal/store"
 )
 
 type historyState struct {

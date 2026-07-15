@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"journal/internal/store"
+	"github.com/nd28/journal-tui/internal/store"
 )
 
 func TestEnterHistoryLoadsSessions(t *testing.T) {
