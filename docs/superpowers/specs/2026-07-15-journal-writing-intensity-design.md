@@ -92,14 +92,17 @@ executed after the existing `CREATE TABLE IF NOT EXISTS` schema (idempotent: a
 // history for a meaningful baseline, so callers should skip intensity detection
 // entirely rather than compare against a noisy average.
 func (s *Store) RecentAvgPace(n int) (avgWPM float64, ok bool, err error)
+
+// RecordSessionPace persists the two pace columns for an already-finished
+// session. Kept separate from FinishSession (rather than growing its parameter
+// list) so the ~20 existing FinishSession call sites across the test suite are
+// unaffected — they simply leave these columns NULL, which RecentAvgPace already
+// treats as "no data yet."
+func (s *Store) RecordSessionPace(sessionID int64, avgPaceWPM, peakIntensityRatio float64) error
 ```
 
-Called with `n = 10` (last 10 finished sessions).
-
-`FinishSession`'s signature gains two parameters, `avgPaceWPM float64` and
-`peakIntensityRatio float64`, persisted alongside the existing session-score update.
-All existing call sites (in `writing.go` and the test suite) need updating to pass
-these through.
+Called with `n = 10` (last 10 finished sessions). `endWritingSession` calls
+`RecordSessionPace` once, immediately after `FinishSession` succeeds.
 
 `SessionRecord` gains `AvgPaceWPM float64` and `PeakIntensityRatio float64` fields;
 `SearchSessions`'s query selects the two new columns so History/Read can display them.
@@ -123,8 +126,9 @@ these through.
   When pace is below the "Focused" threshold (the common case), the header looks
   exactly as it does today — no added noise.
 - **Session end:** `endWritingSession` computes this session's own average pace
-  (`total words / wall-clock duration in minutes`) and passes it, plus the tracked
-  peak ratio (0 if no baseline was available), into `FinishSession`.
+  (`total words / wall-clock duration in minutes`) and, after `FinishSession`
+  succeeds, calls `RecordSessionPace` with that value and the tracked peak ratio
+  (0 if no baseline was available).
 
 ## Display on other screens
 
