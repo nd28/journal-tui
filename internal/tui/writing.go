@@ -22,6 +22,50 @@ type writingState struct {
 	entryDate     string
 }
 
+const (
+	writingMaxWidth    = 100
+	writingWidthMargin = 4
+	writingMinWidth    = 20
+
+	// writingChromeLines is the writing screen's fixed vertical overhead:
+	// header, two blank separators, the help line, a line reserved for the
+	// paste-block warning (even when not currently shown, so a paste
+	// attempt never causes clipping), and the version footer appended by
+	// Model.View().
+	writingChromeLines  = 6
+	writingHeightMargin = 2
+	writingMinHeight    = 3
+
+	compactWidth  = 40
+	compactHeight = 6
+)
+
+// writingDimensions computes the textarea's width/height for the writing
+// screen given the terminal size and whether compact mode is active.
+// Compact mode ignores the terminal size entirely and returns
+// bubbles/textarea's own built-in default (40x6) — today's v1 behavior.
+func writingDimensions(termWidth, termHeight int, compact bool) (width, height int) {
+	if compact {
+		return compactWidth, compactHeight
+	}
+
+	width = termWidth
+	if width > writingMaxWidth {
+		width = writingMaxWidth
+	}
+	width -= writingWidthMargin
+	if width < writingMinWidth {
+		width = writingMinWidth
+	}
+
+	height = termHeight - writingChromeLines - writingHeightMargin
+	if height < writingMinHeight {
+		height = writingMinHeight
+	}
+
+	return width, height
+}
+
 type comboTickMsg time.Time
 
 func comboTick() tea.Cmd {
@@ -69,6 +113,14 @@ func (m Model) startWritingSession() (tea.Model, tea.Cmd) {
 	ta := textarea.New()
 	ta.Placeholder = "Start writing..."
 	ta.ShowLineNumbers = false
+	// Prompt defaults to a 2-column "┃ " gutter that SetWidth reserves out
+	// of the content width. Clearing it removes that reservation so the
+	// textarea's content width matches writingDimensions exactly, and
+	// reclaims those columns for actual writing space.
+	ta.Prompt = ""
+	w, h := writingDimensions(m.width, m.height, m.compactMode)
+	ta.SetWidth(w)
+	ta.SetHeight(h)
 	focusCmd := ta.Focus()
 
 	m.writing = writingState{
@@ -144,6 +196,13 @@ func (m Model) updateWriting(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, comboTick()
 	}
 
+	if _, ok := msg.(tea.WindowSizeMsg); ok {
+		w, h := writingDimensions(m.width, m.height, m.compactMode)
+		m.writing.textarea.SetWidth(w)
+		m.writing.textarea.SetHeight(h)
+		return m, nil
+	}
+
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.String() {
 		case "ctrl+c":
@@ -156,6 +215,12 @@ func (m Model) updateWriting(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.err = err
 				}
 			}
+			return m, nil
+		case "ctrl+t":
+			m.compactMode = !m.compactMode
+			w, h := writingDimensions(m.width, m.height, m.compactMode)
+			m.writing.textarea.SetWidth(w)
+			m.writing.textarea.SetHeight(h)
 			return m, nil
 		}
 	}
@@ -174,6 +239,6 @@ func (m Model) viewWriting() string {
 		m.writing.session.TotalWords(),
 		renderComboBar(combo.Multiplier, 20),
 	)
-	help := statStyle.Render("ctrl+n: new entry   esc: end session")
+	help := statStyle.Render("ctrl+n: new entry   ctrl+t: toggle size   esc: end session")
 	return titleStyle.Render(header) + "\n\n" + m.writing.textarea.View() + "\n\n" + help
 }

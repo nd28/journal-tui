@@ -24,8 +24,9 @@ type Model struct {
 	store  *store.Store
 	stats  store.Stats
 
-	width  int
-	height int
+	width       int
+	height      int
+	compactMode bool
 
 	homeCursor int
 
