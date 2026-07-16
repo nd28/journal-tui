@@ -316,3 +316,182 @@ func TestGetEntriesReturnsEntriesInWriteOrder(t *testing.T) {
 		t.Fatalf("expected entries in write order, got %+v", entries)
 	}
 }
+
+func TestOpenTwiceOnSameFileToleratesRepeatMigration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "journal.db")
+
+	s1, err := Open(path)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	s1.Close()
+
+	if _, err := Open(path); err != nil {
+		t.Fatalf("second Open on the same file: %v", err)
+	}
+}
+
+func TestRecordSessionPacePersistsAndSearchSessionsReturnsIt(t *testing.T) {
+	s := openTestStore(t)
+	now := time.Now()
+	today := now.Format("2006-01-02")
+
+	id, err := s.StartSession(now)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := s.SaveEntry(id, now, "hello world", 2); err != nil {
+		t.Fatalf("SaveEntry: %v", err)
+	}
+	if _, _, err := s.FinishSession(id, now, 10, 1.0, 1, today); err != nil {
+		t.Fatalf("FinishSession: %v", err)
+	}
+	if err := s.RecordSessionPace(id, 42.5, 2.1); err != nil {
+		t.Fatalf("RecordSessionPace: %v", err)
+	}
+
+	results, _, err := s.SearchSessions("", 10, 0)
+	if err != nil {
+		t.Fatalf("SearchSessions: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].AvgPaceWPM != 42.5 {
+		t.Fatalf("expected AvgPaceWPM 42.5, got %v", results[0].AvgPaceWPM)
+	}
+	if results[0].PeakIntensityRatio != 2.1 {
+		t.Fatalf("expected PeakIntensityRatio 2.1, got %v", results[0].PeakIntensityRatio)
+	}
+}
+
+func TestSearchSessionsWithoutRecordedPaceReturnsZero(t *testing.T) {
+	s := openTestStore(t)
+	now := time.Now()
+	id, err := s.StartSession(now)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := s.SaveEntry(id, now, "hello", 1); err != nil {
+		t.Fatalf("SaveEntry: %v", err)
+	}
+	if _, _, err := s.FinishSession(id, now, 10, 1.0, 1, now.Format("2006-01-02")); err != nil {
+		t.Fatalf("FinishSession: %v", err)
+	}
+
+	results, _, err := s.SearchSessions("", 10, 0)
+	if err != nil {
+		t.Fatalf("SearchSessions: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].AvgPaceWPM != 0 || results[0].PeakIntensityRatio != 0 {
+		t.Fatalf("expected zero pace fields without RecordSessionPace, got %+v", results[0])
+	}
+}
+
+func TestRecentAvgPaceRequiresMinimumSessions(t *testing.T) {
+	s := openTestStore(t)
+	now := time.Now()
+	today := now.Format("2006-01-02")
+
+	for i := 0; i < 2; i++ {
+		id, err := s.StartSession(now)
+		if err != nil {
+			t.Fatalf("StartSession: %v", err)
+		}
+		if _, _, err := s.FinishSession(id, now, 10, 1.0, 1, today); err != nil {
+			t.Fatalf("FinishSession: %v", err)
+		}
+		if err := s.RecordSessionPace(id, 30, 0); err != nil {
+			t.Fatalf("RecordSessionPace: %v", err)
+		}
+	}
+
+	_, ok, err := s.RecentAvgPace(10)
+	if err != nil {
+		t.Fatalf("RecentAvgPace: %v", err)
+	}
+	if ok {
+		t.Fatal("expected ok=false with fewer than 3 recorded sessions")
+	}
+}
+
+func TestRecentAvgPaceAveragesLastNSessions(t *testing.T) {
+	s := openTestStore(t)
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	today := base.Format("2006-01-02")
+
+	paces := []float64{10, 20, 30, 40, 100}
+	for i, p := range paces {
+		startedAt := base.Add(time.Duration(i) * time.Hour)
+		id, err := s.StartSession(startedAt)
+		if err != nil {
+			t.Fatalf("StartSession: %v", err)
+		}
+		if _, _, err := s.FinishSession(id, startedAt, 10, 1.0, 1, today); err != nil {
+			t.Fatalf("FinishSession: %v", err)
+		}
+		if err := s.RecordSessionPace(id, p, 0); err != nil {
+			t.Fatalf("RecordSessionPace: %v", err)
+		}
+	}
+
+	avg, ok, err := s.RecentAvgPace(3)
+	if err != nil {
+		t.Fatalf("RecentAvgPace: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true with 5 recorded sessions")
+	}
+	// Last 3 by started_at desc: 100, 40, 30.
+	want := (100.0 + 40.0 + 30.0) / 3.0
+	if avg != want {
+		t.Fatalf("expected avg %v, got %v", want, avg)
+	}
+}
+
+func TestRecentAvgPaceExcludesSessionsWithoutRecordedPace(t *testing.T) {
+	s := openTestStore(t)
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	today := base.Format("2006-01-02")
+
+	for i, p := range []float64{10, 20, 30} {
+		startedAt := base.Add(time.Duration(i) * time.Hour)
+		id, err := s.StartSession(startedAt)
+		if err != nil {
+			t.Fatalf("StartSession: %v", err)
+		}
+		if _, _, err := s.FinishSession(id, startedAt, 10, 1.0, 1, today); err != nil {
+			t.Fatalf("FinishSession: %v", err)
+		}
+		if err := s.RecordSessionPace(id, p, 0); err != nil {
+			t.Fatalf("RecordSessionPace: %v", err)
+		}
+	}
+
+	// A more recent session with no recorded pace (e.g. from before this
+	// feature shipped) must not pull the baseline toward zero.
+	later := base.Add(3 * time.Hour)
+	id, err := s.StartSession(later)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if _, _, err := s.FinishSession(id, later, 10, 1.0, 1, today); err != nil {
+		t.Fatalf("FinishSession: %v", err)
+	}
+
+	avg, ok, err := s.RecentAvgPace(10)
+	if err != nil {
+		t.Fatalf("RecentAvgPace: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true, 3 sessions have recorded pace")
+	}
+	want := (10.0 + 20.0 + 30.0) / 3.0
+	if avg != want {
+		t.Fatalf("expected avg %v (unrecorded session excluded), got %v", want, avg)
+	}
+}

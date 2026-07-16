@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -48,7 +49,31 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
+}
+
+// migrate adds columns introduced after the initial schema. SQLite's ALTER
+// TABLE has no "IF NOT EXISTS", so a repeat run is expected to fail with
+// "duplicate column name" on an already-migrated file — that specific error
+// is swallowed; any other error is not.
+func migrate(db *sql.DB) error {
+	stmts := []string{
+		`ALTER TABLE sessions ADD COLUMN avg_pace_wpm REAL`,
+		`ALTER TABLE sessions ADD COLUMN peak_intensity_ratio REAL`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			if strings.Contains(err.Error(), "duplicate column name") {
+				continue
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) Close() error {

@@ -6,10 +6,12 @@ import (
 )
 
 type SessionRecord struct {
-	ID           int64
-	StartedAt    string
-	SessionScore int
-	WordCount    int
+	ID                 int64
+	StartedAt          string
+	SessionScore       int
+	WordCount          int
+	AvgPaceWPM         float64
+	PeakIntensityRatio float64
 }
 
 func (s *Store) StartSession(now time.Time) (int64, error) {
@@ -77,6 +79,57 @@ func (s *Store) FinishSession(sessionID int64, endedAt time.Time, sessionScore i
 	return stats, isNewHigh, nil
 }
 
+// RecordSessionPace persists a finished session's own average pace and the
+// peak intensity ratio reached during it. Kept separate from FinishSession
+// (rather than growing its parameter list) so the many existing
+// FinishSession call sites across the test suite are unaffected — they
+// simply leave these columns NULL, which RecentAvgPace and SearchSessions
+// already treat as "no data recorded."
+func (s *Store) RecordSessionPace(sessionID int64, avgPaceWPM, peakIntensityRatio float64) error {
+	_, err := s.db.Exec(
+		`UPDATE sessions SET avg_pace_wpm = ?, peak_intensity_ratio = ? WHERE id = ?`,
+		avgPaceWPM, peakIntensityRatio, sessionID,
+	)
+	return err
+}
+
+const minBaselineSessions = 3
+
+// RecentAvgPace averages avg_pace_wpm over the last n finished sessions
+// that have it set (older sessions, from before pace tracking existed,
+// have it NULL and are excluded). ok is false when fewer than
+// minBaselineSessions such sessions exist — too little history for a
+// meaningful personal baseline.
+func (s *Store) RecentAvgPace(n int) (avgWPM float64, ok bool, err error) {
+	rows, err := s.db.Query(`
+		SELECT avg_pace_wpm FROM sessions
+		WHERE ended_at IS NOT NULL AND avg_pace_wpm IS NOT NULL
+		ORDER BY started_at DESC
+		LIMIT ?`, n)
+	if err != nil {
+		return 0, false, err
+	}
+	defer rows.Close()
+
+	var sum float64
+	var count int
+	for rows.Next() {
+		var v float64
+		if err := rows.Scan(&v); err != nil {
+			return 0, false, err
+		}
+		sum += v
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		return 0, false, err
+	}
+	if count < minBaselineSessions {
+		return 0, false, nil
+	}
+	return sum / float64(count), true, nil
+}
+
 // ComputeStreak returns the consecutive-day streak for a session written on
 // `today`, given the last entry date and streak recorded in stats. Pure and
 // DB-free: same day returns the current streak unchanged, the day after
@@ -119,6 +172,8 @@ func (s *Store) SearchSessions(query string, limit, offset int) ([]SessionSearch
 			s.started_at,
 			s.session_score,
 			COALESCE((SELECT SUM(e.word_count) FROM entries e WHERE e.session_id = s.id), 0),
+			s.avg_pace_wpm,
+			s.peak_intensity_ratio,
 			(SELECT e.body FROM entries e WHERE e.session_id = s.id AND e.body LIKE '%' || ? || '%' ORDER BY e.created_at ASC LIMIT 1)
 		FROM sessions s
 		WHERE s.ended_at IS NOT NULL
@@ -133,10 +188,13 @@ func (s *Store) SearchSessions(query string, limit, offset int) ([]SessionSearch
 	var out []SessionSearchResult
 	for rows.Next() {
 		var r SessionSearchResult
+		var avgPace, peakRatio sql.NullFloat64
 		var snippet sql.NullString
-		if err := rows.Scan(&r.ID, &r.StartedAt, &r.SessionScore, &r.WordCount, &snippet); err != nil {
+		if err := rows.Scan(&r.ID, &r.StartedAt, &r.SessionScore, &r.WordCount, &avgPace, &peakRatio, &snippet); err != nil {
 			return nil, 0, err
 		}
+		r.AvgPaceWPM = avgPace.Float64
+		r.PeakIntensityRatio = peakRatio.Float64
 		if query != "" && snippet.Valid {
 			r.Snippet = truncateSnippet(snippet.String)
 		}
