@@ -237,6 +237,37 @@ func TestViewWritingShowsRatioWithBaseline(t *testing.T) {
 	if !strings.Contains(got, "42 WPM · 1.4x") {
 		t.Fatalf("expected WPM and ratio, got %q", got)
 	}
+	if tierIdx, paceIdx := strings.Index(got, "Focused"), strings.Index(got, "42 WPM"); tierIdx == -1 || tierIdx > paceIdx {
+		t.Fatalf("expected the tier tag to precede the pace reading, got %q", got)
+	}
+}
+
+func TestViewWritingShowsRatioWithoutTierAtNormalPace(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	updated, _ := m.startWritingSession()
+	m = updated.(Model)
+
+	m.writing.hasBaseline = true
+	m.writing.liveWPM = 28
+	m.writing.intensityRatio = 0.9
+
+	got := m.viewWriting()
+	if !strings.Contains(got, "28 WPM · 0.9x") {
+		t.Fatalf("expected WPM and ratio at normal pace, got %q", got)
+	}
+	if strings.Contains(got, "Focused") || strings.Contains(got, "Intense") || strings.Contains(got, "Frantic") {
+		t.Fatalf("expected no tier tag at normal pace, got %q", got)
+	}
 }
 
 func TestViewWritingShowsZeroWPMAtSessionStart(t *testing.T) {
