@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/nd28/journal-tui/internal/scoring"
 )
 
 type summaryState struct {
@@ -41,7 +43,10 @@ func (m Model) viewSummary() string {
 	b.WriteString(statStyle.Render(fmt.Sprintf("Raw score:      %s", formatNumber(m.summary.rawScore))) + "\n")
 	b.WriteString(statStyle.Render(fmt.Sprintf("Streak bonus:   +%.0f%%", (m.summary.bonus-1)*100)) + "\n")
 	b.WriteString(statStyle.Render(fmt.Sprintf("Session score:  %s", formatNumber(m.summary.finalScore))) + "\n")
-	b.WriteString(statStyle.Render(fmt.Sprintf("Lifetime score: %s", formatNumber(m.stats.LifetimeScore))) + "\n\n")
-	b.WriteString(statStyle.Render("enter: back to home") + "\n")
+	b.WriteString(statStyle.Render(fmt.Sprintf("Lifetime score: %s", formatNumber(m.stats.LifetimeScore))) + "\n")
+	if tier := scoring.IntensityTier(m.summary.peakIntensityRatio); tier != "" {
+		b.WriteString(statStyle.Render(fmt.Sprintf("Peak pace:      %s (%.1fx your recent average)", tier, m.summary.peakIntensityRatio)) + "\n")
+	}
+	b.WriteString("\n" + statStyle.Render("enter: back to home") + "\n")
 	return b.String()
 }

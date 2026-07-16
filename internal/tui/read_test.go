@@ -169,6 +169,41 @@ func TestViewReadIncludesSessionStats(t *testing.T) {
 	}
 }
 
+func TestViewReadShowsIntensityTagWhenElevated(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	now := time.Now()
+	id, err := s.StartSession(now)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := s.SaveEntry(id, now, "some text", 2); err != nil {
+		t.Fatalf("SaveEntry: %v", err)
+	}
+	if _, _, err := s.FinishSession(id, now, 10, 1.0, 1, now.Format("2006-01-02")); err != nil {
+		t.Fatalf("FinishSession: %v", err)
+	}
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	m.width, m.height = 100, 30
+
+	session := store.SessionSearchResult{SessionRecord: store.SessionRecord{ID: id, StartedAt: "2026-07-15T10:00:00Z", SessionScore: 42, WordCount: 7, PeakIntensityRatio: 2.1}}
+	updated, _ := m.enterRead(session)
+	m = updated.(Model)
+
+	if got := m.viewRead(); !strings.Contains(got, "· Intense") {
+		t.Fatalf("expected view to show the Intense tag, got %q", got)
+	}
+}
+
 func TestHistoryEnterOpensReadForSelectedSessionAndEscReturnsWithStateIntact(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "journal.db"))

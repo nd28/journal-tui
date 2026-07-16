@@ -2,6 +2,7 @@ package tui
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +49,40 @@ func TestEnterHistoryLoadsSessions(t *testing.T) {
 	}
 	if m.history.results[0].Snippet != "" {
 		t.Fatalf("expected empty snippet with no query, got %q", m.history.results[0].Snippet)
+	}
+}
+
+func TestViewHistoryShowsIntensityTagForElevatedSessions(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	id, err := s.StartSession(time.Now())
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := s.SaveEntry(id, time.Now(), "hello world", 2); err != nil {
+		t.Fatalf("SaveEntry: %v", err)
+	}
+	if _, _, err := s.FinishSession(id, time.Now(), 42, 1.0, 1, time.Now().Format("2006-01-02")); err != nil {
+		t.Fatalf("FinishSession: %v", err)
+	}
+	if err := s.RecordSessionPace(id, 50, 2.1); err != nil {
+		t.Fatalf("RecordSessionPace: %v", err)
+	}
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	updated, _ := m.enterHistory()
+	m = updated.(Model)
+
+	if got := m.viewHistory(); !strings.Contains(got, "· Intense") {
+		t.Fatalf("expected the history line to show the Intense tag, got %q", got)
 	}
 }
 

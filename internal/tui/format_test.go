@@ -45,3 +45,15 @@ func TestFormatCountPluralizes(t *testing.T) {
 		t.Fatalf("expected comma-separated plural, got %q", got)
 	}
 }
+
+func TestFormatIntensityTagEmptyAtNormalPace(t *testing.T) {
+	if got := formatIntensityTag(0); got != "" {
+		t.Fatalf("expected empty tag at normal pace, got %q", got)
+	}
+}
+
+func TestFormatIntensityTagShowsTier(t *testing.T) {
+	if got := formatIntensityTag(2.1); got != "   · Intense" {
+		t.Fatalf("expected intense tag, got %q", got)
+	}
+}

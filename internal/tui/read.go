@@ -108,10 +108,11 @@ func (m Model) viewRead() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Read") + "\n\n")
 	b.WriteString(statStyle.Render(fmt.Sprintf(
-		"%s   Score: %s   %s",
+		"%s   Score: %s   %s%s",
 		formatSessionDate(m.read.session.StartedAt),
 		formatNumber(m.read.session.SessionScore),
 		formatCount(m.read.session.WordCount, "word", "words"),
+		formatIntensityTag(m.read.session.PeakIntensityRatio),
 	)) + "\n\n")
 	b.WriteString(m.read.viewport.View() + "\n")
 	b.WriteString(statStyle.Render("up/down/pgup/pgdn: scroll   esc: back to history"))

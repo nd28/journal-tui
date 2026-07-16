@@ -123,10 +123,11 @@ func (m Model) viewHistory() string {
 			style = selectedStyle
 		}
 		b.WriteString(cursor + style.Render(fmt.Sprintf(
-			"%s   Score: %s   %s",
+			"%s   Score: %s   %s%s",
 			formatSessionDate(r.StartedAt),
 			formatNumber(r.SessionScore),
 			formatCount(r.WordCount, "word", "words"),
+			formatIntensityTag(r.PeakIntensityRatio),
 		)) + "\n")
 		if r.Snippet != "" {
 			b.WriteString("    " + statStyle.Render(r.Snippet) + "\n")
