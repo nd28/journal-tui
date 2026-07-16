@@ -68,3 +68,15 @@ func TestFinalScoreAppliesStreakBonus(t *testing.T) {
 		t.Fatalf("FinalScore(100, 3) = %d, want 115", got)
 	}
 }
+
+func TestCompleteWordFeedsPaceTracker(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	s := NewSession(t0)
+	s.CompleteWord(t0)
+	s.CompleteWord(t0.Add(1 * time.Second))
+
+	// Same floored-window math as TestPaceTrackerWPMFloorsElapsedForFewEarlyWords.
+	if got := s.Pace.WPM(t0.Add(1 * time.Second)); got != 24 {
+		t.Fatalf("expected Session.CompleteWord to feed Pace, got %v WPM", got)
+	}
+}

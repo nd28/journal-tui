@@ -20,6 +20,7 @@ type Entry struct {
 // finalized entries and the words/points typed since the last one.
 type Session struct {
 	Combo   ComboState
+	Pace    PaceTracker
 	Entries []Entry
 
 	currentWords  int
@@ -33,6 +34,7 @@ func NewSession(now time.Time) *Session {
 // CompleteWord registers a completed word in the current (in-progress) entry.
 func (s *Session) CompleteWord(now time.Time) {
 	points := s.Combo.CompleteWord(now)
+	s.Pace.CompleteWord(now)
 	s.currentPoints += points
 	s.currentWords++
 }
