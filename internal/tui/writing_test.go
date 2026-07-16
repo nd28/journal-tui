@@ -186,6 +186,42 @@ func TestViewWritingHidesTierTagAtNormalPace(t *testing.T) {
 	}
 }
 
+func TestComboTickUpdatesLiveWPMWithoutBaseline(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	updated, _ := m.startWritingSession()
+	m = updated.(Model)
+	if m.writing.hasBaseline {
+		t.Fatal("expected no baseline for a fresh store")
+	}
+
+	now := time.Now()
+	m.writing.session.CompleteWord(now)
+	m.writing.session.CompleteWord(now.Add(1 * time.Second))
+
+	// 2 words 1s apart floors to a 5s window: 2 / (5s in minutes) = 24 WPM.
+	tickTime := now.Add(1 * time.Second)
+	updated, _ = m.updateWriting(comboTickMsg(tickTime))
+	m = updated.(Model)
+
+	if got := m.writing.liveWPM; got != 24 {
+		t.Fatalf("expected live WPM 24 without a baseline, got %v", got)
+	}
+	if got := m.writing.intensityRatio; got != 0 {
+		t.Fatalf("expected intensity ratio to stay 0 without a baseline, got %v", got)
+	}
+}
+
 func TestEndWritingSessionRecordsPace(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "journal.db"))

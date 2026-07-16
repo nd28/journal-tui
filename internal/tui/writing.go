@@ -24,6 +24,7 @@ type writingState struct {
 
 	baselineWPM        float64
 	hasBaseline        bool
+	liveWPM            float64
 	intensityRatio     float64
 	peakIntensityRatio float64
 }
@@ -219,8 +220,9 @@ func (m Model) updateWriting(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if tickMsg, ok := msg.(comboTickMsg); ok {
 		now := time.Time(tickMsg)
 		m.writing.session.Combo.Tick(now)
+		m.writing.liveWPM = m.writing.session.Pace.WPM(now)
 		if m.writing.hasBaseline {
-			m.writing.intensityRatio = m.writing.session.Pace.WPM(now) / m.writing.baselineWPM
+			m.writing.intensityRatio = m.writing.liveWPM / m.writing.baselineWPM
 			if m.writing.intensityRatio > m.writing.peakIntensityRatio {
 				m.writing.peakIntensityRatio = m.writing.intensityRatio
 			}
