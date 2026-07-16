@@ -127,12 +127,20 @@ func TestComboTickUpdatesIntensityAndTracksPeak(t *testing.T) {
 		t.Fatalf("expected peak ratio 2.4, got %v", got)
 	}
 
-	// A later tick over the same (unchanged) event window yields the same
-	// ratio, and the tracked peak must not have decreased.
-	updated, _ = m.updateWriting(comboTickMsg(tickTime))
+	// A later tick, with no new words typed, must show the live ratio
+	// dropping (pace has cooled since the last word) while the tracked
+	// peak stays at its high-water mark. 40s after the last word: WPM =
+	// 2 words / (40s in minutes) = 3.0 WPM; ratio = 3.0 / 10 = 0.3 — well
+	// below the Focused threshold, so intensityRatio must fall, but
+	// peakIntensityRatio must not.
+	laterTick := now.Add(40 * time.Second)
+	updated, _ = m.updateWriting(comboTickMsg(laterTick))
 	m = updated.(Model)
+	if got := m.writing.intensityRatio; got != 0.3 {
+		t.Fatalf("expected intensity ratio to drop to 0.3, got %v", got)
+	}
 	if got := m.writing.peakIntensityRatio; got != 2.4 {
-		t.Fatalf("expected peak ratio to remain 2.4, got %v", got)
+		t.Fatalf("expected peak ratio to remain 2.4 after a later, slower tick, got %v", got)
 	}
 }
 
