@@ -186,6 +186,80 @@ func TestViewWritingHidesTierTagAtNormalPace(t *testing.T) {
 	}
 }
 
+func TestViewWritingShowsWPMOnlyWithoutBaseline(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	updated, _ := m.startWritingSession()
+	m = updated.(Model)
+	if m.writing.hasBaseline {
+		t.Fatal("expected no baseline for a fresh store")
+	}
+
+	m.writing.liveWPM = 42
+	got := m.viewWriting()
+	if !strings.Contains(got, "42 WPM") {
+		t.Fatalf("expected WPM-only reading, got %q", got)
+	}
+	if strings.Contains(got, "WPM ·") {
+		t.Fatalf("expected no ratio without a baseline, got %q", got)
+	}
+}
+
+func TestViewWritingShowsRatioWithBaseline(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	updated, _ := m.startWritingSession()
+	m = updated.(Model)
+
+	m.writing.hasBaseline = true
+	m.writing.liveWPM = 42
+	m.writing.intensityRatio = 1.4
+
+	got := m.viewWriting()
+	if !strings.Contains(got, "42 WPM · 1.4x") {
+		t.Fatalf("expected WPM and ratio, got %q", got)
+	}
+}
+
+func TestViewWritingShowsZeroWPMAtSessionStart(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	updated, _ := m.startWritingSession()
+	m = updated.(Model)
+
+	got := m.viewWriting()
+	if !strings.Contains(got, "0 WPM") {
+		t.Fatalf("expected 0 WPM before the first word, got %q", got)
+	}
+}
+
 func TestComboTickUpdatesLiveWPMWithoutBaseline(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "journal.db"))

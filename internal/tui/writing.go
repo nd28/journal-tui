@@ -282,6 +282,7 @@ func (m Model) viewWriting() string {
 	if tier := scoring.IntensityTier(m.writing.intensityRatio); tier != "" {
 		header += "   " + tier
 	}
+	header += "   " + formatPaceInfo(m.writing.liveWPM, m.writing.intensityRatio, m.writing.hasBaseline)
 	help := statStyle.Render("ctrl+n: new entry   ctrl+t: toggle size   esc: end session")
 	view := titleStyle.Render(header) + "\n\n" + m.writing.textarea.View() + "\n\n" + help
 	if m.writing.pasteWarning != "" {
