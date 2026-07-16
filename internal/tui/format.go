@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -61,4 +62,14 @@ func formatIntensityTag(peakRatio float64) string {
 		return ""
 	}
 	return "   · " + tier
+}
+
+// formatPaceInfo renders the live pace readout for the writing header: just
+// the WPM reading with no baseline yet, or WPM plus the ratio against
+// personal baseline once one exists.
+func formatPaceInfo(wpm, ratio float64, hasBaseline bool) string {
+	if !hasBaseline {
+		return fmt.Sprintf("%.0f WPM", wpm)
+	}
+	return fmt.Sprintf("%.0f WPM · %.1fx", wpm, ratio)
 }

@@ -57,3 +57,21 @@ func TestFormatIntensityTagShowsTier(t *testing.T) {
 		t.Fatalf("expected intense tag, got %q", got)
 	}
 }
+
+func TestFormatPaceInfoWithoutBaselineShowsWPMOnly(t *testing.T) {
+	if got := formatPaceInfo(42, 0, false); got != "42 WPM" {
+		t.Fatalf("expected WPM-only reading, got %q", got)
+	}
+}
+
+func TestFormatPaceInfoWithBaselineShowsRatio(t *testing.T) {
+	if got := formatPaceInfo(42, 1.4, true); got != "42 WPM · 1.4x" {
+		t.Fatalf("expected WPM and ratio, got %q", got)
+	}
+}
+
+func TestFormatPaceInfoRoundsWPMToWholeNumber(t *testing.T) {
+	if got := formatPaceInfo(41.6, 0, false); got != "42 WPM" {
+		t.Fatalf("expected rounded WPM, got %q", got)
+	}
+}
