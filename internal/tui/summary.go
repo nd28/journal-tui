@@ -8,11 +8,12 @@ import (
 )
 
 type summaryState struct {
-	rawScore   int
-	finalScore int
-	bonus      float64
-	totalWords int
-	isNewHigh  bool
+	rawScore           int
+	finalScore         int
+	bonus              float64
+	totalWords         int
+	isNewHigh          bool
+	peakIntensityRatio float64
 }
 
 func (m Model) updateSummary(msg tea.Msg) (tea.Model, tea.Cmd) {

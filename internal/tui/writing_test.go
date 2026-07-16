@@ -53,6 +53,174 @@ func TestRenderComboBarAtCapIsFull(t *testing.T) {
 	}
 }
 
+func TestStartWritingSessionFetchesBaseline(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	today := base.Format("2006-01-02")
+	for i, pace := range []float64{20, 30, 40} {
+		startedAt := base.Add(time.Duration(i) * time.Hour)
+		id, err := s.StartSession(startedAt)
+		if err != nil {
+			t.Fatalf("StartSession: %v", err)
+		}
+		if _, _, err := s.FinishSession(id, startedAt, 10, 1.0, 1, today); err != nil {
+			t.Fatalf("FinishSession: %v", err)
+		}
+		if err := s.RecordSessionPace(id, pace, 0); err != nil {
+			t.Fatalf("RecordSessionPace: %v", err)
+		}
+	}
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	updated, _ := m.startWritingSession()
+	m = updated.(Model)
+
+	if !m.writing.hasBaseline {
+		t.Fatal("expected a baseline after 3 recorded sessions")
+	}
+	if want := (20.0 + 30.0 + 40.0) / 3.0; m.writing.baselineWPM != want {
+		t.Fatalf("expected baseline %v, got %v", want, m.writing.baselineWPM)
+	}
+}
+
+func TestComboTickUpdatesIntensityAndTracksPeak(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	updated, _ := m.startWritingSession()
+	m = updated.(Model)
+	m.writing.hasBaseline = true
+	m.writing.baselineWPM = 10
+
+	now := time.Now()
+	m.writing.session.CompleteWord(now)
+	m.writing.session.CompleteWord(now.Add(1 * time.Second))
+
+	// 2 words 1s apart floors to a 5s window: 24 WPM / 10 baseline = 2.4x.
+	tickTime := now.Add(1 * time.Second)
+	updated, _ = m.updateWriting(comboTickMsg(tickTime))
+	m = updated.(Model)
+
+	if got := m.writing.intensityRatio; got != 2.4 {
+		t.Fatalf("expected intensity ratio 2.4, got %v", got)
+	}
+	if got := m.writing.peakIntensityRatio; got != 2.4 {
+		t.Fatalf("expected peak ratio 2.4, got %v", got)
+	}
+
+	// A later tick over the same (unchanged) event window yields the same
+	// ratio, and the tracked peak must not have decreased.
+	updated, _ = m.updateWriting(comboTickMsg(tickTime))
+	m = updated.(Model)
+	if got := m.writing.peakIntensityRatio; got != 2.4 {
+		t.Fatalf("expected peak ratio to remain 2.4, got %v", got)
+	}
+}
+
+func TestViewWritingShowsTierTagWhenElevated(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	updated, _ := m.startWritingSession()
+	m = updated.(Model)
+
+	m.writing.intensityRatio = scoring.IntensityIntenseRatio
+	if got := m.viewWriting(); !strings.Contains(got, "Intense") {
+		t.Fatalf("expected view to show the Intense tier tag, got %q", got)
+	}
+}
+
+func TestViewWritingHidesTierTagAtNormalPace(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	updated, _ := m.startWritingSession()
+	m = updated.(Model)
+
+	got := m.viewWriting()
+	if strings.Contains(got, "Focused") || strings.Contains(got, "Intense") || strings.Contains(got, "Frantic") {
+		t.Fatalf("expected no tier tag at normal pace, got %q", got)
+	}
+}
+
+func TestEndWritingSessionRecordsPace(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "journal.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	m, err := New(s)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	updated, _ := m.startWritingSession()
+	m = updated.(Model)
+	m.writing.peakIntensityRatio = 2.1
+
+	now := time.Now()
+	m.writing.textarea.SetValue("hello world")
+	m.writing.lastWordCount = syncWordCount(m.writing.session, m.writing.lastWordCount, m.writing.textarea.Value(), now)
+
+	updated, _ = m.endWritingSession()
+	m = updated.(Model)
+
+	if m.summary.peakIntensityRatio != 2.1 {
+		t.Fatalf("expected summary peak ratio 2.1, got %v", m.summary.peakIntensityRatio)
+	}
+
+	results, _, err := s.SearchSessions("", 10, 0)
+	if err != nil {
+		t.Fatalf("SearchSessions: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 finished session, got %d", len(results))
+	}
+	if results[0].PeakIntensityRatio != 2.1 {
+		t.Fatalf("expected persisted peak ratio 2.1, got %v", results[0].PeakIntensityRatio)
+	}
+	if results[0].AvgPaceWPM <= 0 {
+		t.Fatalf("expected a positive recorded avg pace, got %v", results[0].AvgPaceWPM)
+	}
+}
+
 func TestEndWritingSessionPersistsAndUpdatesStats(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "journal.db"))

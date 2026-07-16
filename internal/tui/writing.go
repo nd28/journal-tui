@@ -21,7 +21,14 @@ type writingState struct {
 	streakDays    int
 	entryDate     string
 	pasteWarning  string
+
+	baselineWPM        float64
+	hasBaseline        bool
+	intensityRatio     float64
+	peakIntensityRatio float64
 }
+
+const baselinePaceSessionWindow = 10
 
 const (
 	writingMaxWidth    = 100
@@ -111,6 +118,12 @@ func (m Model) startWritingSession() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	baselineWPM, hasBaseline, err := m.store.RecentAvgPace(baselinePaceSessionWindow)
+	if err != nil {
+		m.err = err
+		return m, nil
+	}
+
 	ta := textarea.New()
 	ta.Placeholder = "Start writing..."
 	ta.ShowLineNumbers = false
@@ -125,12 +138,14 @@ func (m Model) startWritingSession() (tea.Model, tea.Cmd) {
 	focusCmd := ta.Focus()
 
 	m.writing = writingState{
-		textarea:   ta,
-		session:    scoring.NewSession(now),
-		sessionID:  sessionID,
-		startedAt:  now,
-		streakDays: newStreak,
-		entryDate:  today,
+		textarea:    ta,
+		session:     scoring.NewSession(now),
+		sessionID:   sessionID,
+		startedAt:   now,
+		streakDays:  newStreak,
+		entryDate:   today,
+		baselineWPM: baselineWPM,
+		hasBaseline: hasBaseline,
 	}
 	m.screen = screenWriting
 	return m, tea.Batch(focusCmd, comboTick())
@@ -178,14 +193,23 @@ func (m Model) endWritingSession() (tea.Model, tea.Cmd) {
 		m.err = err
 	} else {
 		m.stats = stats
+
+		avgPaceWPM := 0.0
+		if duration := time.Since(m.writing.startedAt).Minutes(); duration > 0 {
+			avgPaceWPM = float64(totalWords) / duration
+		}
+		if err := m.store.RecordSessionPace(m.writing.sessionID, avgPaceWPM, m.writing.peakIntensityRatio); err != nil {
+			m.err = err
+		}
 	}
 
 	m.summary = summaryState{
-		rawScore:   raw,
-		finalScore: final,
-		bonus:      bonus,
-		totalWords: totalWords,
-		isNewHigh:  isNewHigh,
+		rawScore:           raw,
+		finalScore:         final,
+		bonus:              bonus,
+		totalWords:         totalWords,
+		isNewHigh:          isNewHigh,
+		peakIntensityRatio: m.writing.peakIntensityRatio,
 	}
 	m.screen = screenSummary
 	return m, nil
@@ -193,7 +217,14 @@ func (m Model) endWritingSession() (tea.Model, tea.Cmd) {
 
 func (m Model) updateWriting(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if tickMsg, ok := msg.(comboTickMsg); ok {
-		m.writing.session.Combo.Tick(time.Time(tickMsg))
+		now := time.Time(tickMsg)
+		m.writing.session.Combo.Tick(now)
+		if m.writing.hasBaseline {
+			m.writing.intensityRatio = m.writing.session.Pace.WPM(now) / m.writing.baselineWPM
+			if m.writing.intensityRatio > m.writing.peakIntensityRatio {
+				m.writing.peakIntensityRatio = m.writing.intensityRatio
+			}
+		}
 		return m, comboTick()
 	}
 
@@ -246,6 +277,9 @@ func (m Model) viewWriting() string {
 		formatNumber(m.writing.session.TotalWords()),
 		renderComboBar(combo.Multiplier, 20),
 	)
+	if tier := scoring.IntensityTier(m.writing.intensityRatio); tier != "" {
+		header += "   " + tier
+	}
 	help := statStyle.Render("ctrl+n: new entry   ctrl+t: toggle size   esc: end session")
 	view := titleStyle.Render(header) + "\n\n" + m.writing.textarea.View() + "\n\n" + help
 	if m.writing.pasteWarning != "" {
