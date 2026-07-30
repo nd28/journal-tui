@@ -77,3 +77,79 @@ func TestIntensityTierThresholds(t *testing.T) {
 		}
 	}
 }
+
+func TestPaceTrackerNotActiveWithNoEvents(t *testing.T) {
+	var p PaceTracker
+	if p.Active(time.Now()) {
+		t.Fatal("expected an empty tracker to be inactive")
+	}
+}
+
+func TestPaceTrackerActiveWithinGapAndIdleBeyondIt(t *testing.T) {
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	var p PaceTracker
+	p.CompleteWord(base)
+
+	if !p.Active(base.Add(PaceActiveGap)) {
+		t.Fatal("expected active exactly at the gap boundary")
+	}
+	if p.Active(base.Add(PaceActiveGap + time.Second)) {
+		t.Fatal("expected inactive once the gap is exceeded")
+	}
+}
+
+func TestPaceSamplerMedianEmptyReportsNoData(t *testing.T) {
+	var s PaceSampler
+	if _, ok := s.Median(); ok {
+		t.Fatal("expected ok=false with no samples")
+	}
+}
+
+func TestPaceSamplerIgnoresNonPositiveReadings(t *testing.T) {
+	var s PaceSampler
+	s.Sample(0)
+	s.Sample(-5)
+	if _, ok := s.Median(); ok {
+		t.Fatal("expected non-positive readings to be ignored entirely")
+	}
+}
+
+func TestPaceSamplerMedianOddCount(t *testing.T) {
+	var s PaceSampler
+	for _, v := range []float64{50, 10, 30} {
+		s.Sample(v)
+	}
+	got, ok := s.Median()
+	if !ok || got != 30 {
+		t.Fatalf("expected median 30, got %v (ok=%v)", got, ok)
+	}
+}
+
+func TestPaceSamplerMedianEvenCount(t *testing.T) {
+	var s PaceSampler
+	for _, v := range []float64{40, 10, 30, 20} {
+		s.Sample(v)
+	}
+	got, ok := s.Median()
+	if !ok || got != 25 {
+		t.Fatalf("expected median 25, got %v (ok=%v)", got, ok)
+	}
+}
+
+// A handful of fast readings must not be dragged to zero the way a
+// wall-clock average is — this is the whole reason the baseline switched
+// from "total words ÷ session duration" to a median of active readings.
+func TestPaceSamplerMedianResistsIdlePeriods(t *testing.T) {
+	var s PaceSampler
+	for i := 0; i < 5; i++ {
+		s.Sample(60)
+	}
+	// Two slow readings from the tail of a burst shouldn't move it much.
+	s.Sample(12)
+	s.Sample(15)
+
+	got, _ := s.Median()
+	if got != 60 {
+		t.Fatalf("expected the median to stay at the sustained pace of 60, got %v", got)
+	}
+}

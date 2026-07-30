@@ -158,8 +158,8 @@ func TestViewReadIncludesSessionStats(t *testing.T) {
 	m = updated.(Model)
 
 	got := m.viewRead()
-	if !strings.Contains(got, "Jul 15, 2026 · 10:00 AM") {
-		t.Fatalf("expected view to show a human-readable date, got %q", got)
+	if want := formatSessionDate("2026-07-15T10:00:00Z"); !strings.Contains(got, want) {
+		t.Fatalf("expected view to show the date as %q, got %q", want, got)
 	}
 	if !strings.Contains(got, "Score: 42") {
 		t.Fatalf("expected view to show the session's score, got %q", got)

@@ -10,7 +10,9 @@ import (
 )
 
 // formatSessionDate renders a stored RFC3339 timestamp as a human-readable
-// date and time (e.g. "Jul 15, 2026 · 10:00 AM"). Falls back to the raw
+// date and time (e.g. "Jul 15, 2026 · 10:00 AM") in the reader's local zone.
+// Timestamps are stored in UTC, so the conversion is what makes a session
+// show the wall-clock time it was actually written at. Falls back to the raw
 // string if it doesn't parse, so a malformed timestamp degrades gracefully
 // instead of vanishing.
 func formatSessionDate(raw string) string {
@@ -18,7 +20,24 @@ func formatSessionDate(raw string) string {
 	if err != nil {
 		return raw
 	}
-	return t.Format("Jan 2, 2006 · 3:04 PM")
+	return t.Local().Format("Jan 2, 2006 · 3:04 PM")
+}
+
+// truncateToWidth shortens s to at most width columns, marking the cut with
+// an ellipsis. A width of zero or less means the terminal size isn't known
+// yet, in which case s is returned untouched.
+func truncateToWidth(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	return string(r[:width-1]) + "…"
 }
 
 // formatNumber inserts thousands separators (1234 -> "1,234") so large

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
@@ -27,9 +29,20 @@ type writingState struct {
 	liveWPM            float64
 	intensityRatio     float64
 	peakIntensityRatio float64
+	paceSampler        scoring.PaceSampler
 }
 
 const baselinePaceSessionWindow = 10
+
+const pasteWarningText = "paste disabled — write it yourself"
+
+// maxWordsPerUpdate bounds how many words one update can score. Typing adds
+// at most a word per keystroke, so a larger jump means text arrived in bulk
+// — a paste path that slipped past the guard. Unbounded, such a jump awards
+// thousands of points and stamps thousands of words at a single instant,
+// which spikes the pace reading to an impossible value and poisons the
+// personal baseline derived from it.
+const maxWordsPerUpdate = 20
 
 const (
 	writingMaxWidth    = 100
@@ -83,16 +96,44 @@ func comboTick() tea.Cmd {
 	})
 }
 
-// syncWordCount reconciles a session's word count with the current text,
-// awarding points for each newly completed word. Deletions (a lower word
-// count) are not clawed back — points already earned stand — but the
-// returned count is still updated so the next call computes the right delta.
-func syncWordCount(sess *scoring.Session, prevWords int, text string, now time.Time) int {
-	newWords := len(strings.Fields(text))
-	for i := 0; i < newWords-prevWords; i++ {
+// completedWords counts the words in text that are finished — that is,
+// followed by whitespace. A word still being typed isn't counted, so a word
+// isn't scored the instant its first letter lands and pace readings measure
+// words actually written rather than words started.
+func completedWords(text string) int {
+	n := len(strings.Fields(text))
+	if n == 0 {
+		return 0
+	}
+	if last, _ := utf8.DecodeLastRuneInString(text); !unicode.IsSpace(last) {
+		n--
+	}
+	return n
+}
+
+// syncWordCount reconciles a session's scoring state with the current text.
+// highWater is the most completed words this entry has ever held; only words
+// past it score, so deleting a paragraph and retyping it can't collect the
+// same points twice. Editing mid-document is unaffected: the count only has
+// to exceed its own previous maximum. Returns the new high-water mark.
+func syncWordCount(sess *scoring.Session, highWater int, text string, now time.Time) int {
+	words := completedWords(text)
+	if words <= highWater {
+		return highWater
+	}
+
+	gained := words - highWater
+	if gained > maxWordsPerUpdate {
+		gained = maxWordsPerUpdate
+	}
+	for i := 0; i < gained; i++ {
 		sess.CompleteWord(now)
 	}
-	return newWords
+
+	// The mark moves to the full count even when the award was clamped: the
+	// unscored remainder is bulk-inserted text, not writing, and must not
+	// trickle into the score on subsequent keystrokes.
+	return words
 }
 
 func renderComboBar(multiplier float64, width int) string {
@@ -133,6 +174,11 @@ func (m Model) startWritingSession() (tea.Model, tea.Cmd) {
 	// textarea's content width matches writingDimensions exactly, and
 	// reclaims those columns for actual writing space.
 	ta.Prompt = ""
+	// The textarea binds ctrl+v to its own clipboard paste, which arrives as
+	// an internal message rather than a key event — so it slips straight past
+	// the tea.KeyMsg.Paste guard in updateWriting, which only ever sees
+	// terminal-driven bracketed pastes. Disable the binding at the source.
+	ta.KeyMap.Paste.SetEnabled(false)
 	w, h := writingDimensions(m.width, m.height, m.compactMode)
 	ta.SetWidth(w)
 	ta.SetHeight(h)
@@ -159,7 +205,10 @@ func (m Model) startWritingSession() (tea.Model, tea.Cmd) {
 // ok is false when there was nothing to save (an empty/untouched entry).
 func (w *writingState) finalizeCurrentEntry() (body string, wordCount int, ok bool) {
 	text := w.textarea.Value()
-	words := w.lastWordCount
+	// Count what the saved text actually holds, not the scoring high-water
+	// mark: the mark deliberately ignores deletions, so after heavy editing
+	// it overstates what's on the page.
+	words := len(strings.Fields(text))
 
 	w.session.NewEntry()
 	w.textarea.Reset()
@@ -172,14 +221,25 @@ func (w *writingState) finalizeCurrentEntry() (body string, wordCount int, ok bo
 }
 
 func (m Model) endWritingSession() (tea.Model, tea.Cmd) {
+	savedEntry := false
 	if body, words, ok := m.writing.finalizeCurrentEntry(); ok {
+		savedEntry = true
 		if err := m.store.SaveEntry(m.writing.sessionID, time.Now(), body, words); err != nil {
 			m.err = err
 		}
 	}
 
 	totalWords := m.writing.session.TotalWords()
-	if totalWords == 0 {
+	if totalWords == 0 && !savedEntry {
+		// Nothing was written, so the row StartSession inserted is noise.
+		// Drop it rather than leaving an unfinished session behind forever
+		// — opening the writing screen and changing your mind shouldn't
+		// leave a trace. The savedEntry guard keeps a session that holds
+		// text but no completed word (a single unterminated word) from
+		// taking its own writing down with it.
+		if err := m.store.DiscardSession(m.writing.sessionID); err != nil {
+			m.err = err
+		}
 		m.screen = screenHome
 		m.homeCursor = 0
 		return m, nil
@@ -195,12 +255,19 @@ func (m Model) endWritingSession() (tea.Model, tea.Cmd) {
 	} else {
 		m.stats = stats
 
-		avgPaceWPM := 0.0
-		if duration := time.Since(m.writing.startedAt).Minutes(); duration > 0 {
-			avgPaceWPM = float64(totalWords) / duration
-		}
-		if err := m.store.RecordSessionPace(m.writing.sessionID, avgPaceWPM, m.writing.peakIntensityRatio); err != nil {
-			m.err = err
+		// Record the median of the pace readings taken while actually
+		// typing, not total words over wall-clock duration. The live
+		// readings this session's baseline will be compared against are
+		// burst measurements, so the baseline has to be one too; a
+		// wall-clock average counts every pause as slow writing and drags
+		// the baseline toward zero, which inflates every future ratio.
+		// With no readings at all the session was too short to measure —
+		// leave the columns NULL so it's excluded from the baseline rather
+		// than recorded as a pace of zero.
+		if activePaceWPM, ok := m.writing.paceSampler.Median(); ok {
+			if err := m.store.RecordSessionPace(m.writing.sessionID, activePaceWPM, m.writing.peakIntensityRatio); err != nil {
+				m.err = err
+			}
 		}
 	}
 
@@ -221,6 +288,9 @@ func (m Model) updateWriting(msg tea.Msg) (tea.Model, tea.Cmd) {
 		now := time.Time(tickMsg)
 		m.writing.session.Combo.Tick(now)
 		m.writing.liveWPM = m.writing.session.Pace.WPM(now)
+		if m.writing.session.Pace.Active(now) {
+			m.writing.paceSampler.Sample(m.writing.liveWPM)
+		}
 		if m.writing.hasBaseline {
 			m.writing.intensityRatio = m.writing.liveWPM / m.writing.baselineWPM
 			if m.writing.intensityRatio > m.writing.peakIntensityRatio {
@@ -239,12 +309,17 @@ func (m Model) updateWriting(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		if keyMsg.Paste {
-			m.writing.pasteWarning = "paste disabled — write it yourself"
+			m.writing.pasteWarning = pasteWarningText
 			return m, nil
 		}
 		m.writing.pasteWarning = ""
 
 		switch keyMsg.String() {
+		case "ctrl+v":
+			// The textarea's own paste binding is disabled, so this key
+			// would otherwise do nothing silently. Say why.
+			m.writing.pasteWarning = pasteWarningText
+			return m, nil
 		case "ctrl+c":
 			return m, tea.Quit
 		case "esc", "ctrl+d":
@@ -283,6 +358,9 @@ func (m Model) viewWriting() string {
 		header += "   " + tier
 	}
 	header += "   " + formatPaceInfo(m.writing.liveWPM, m.writing.intensityRatio, m.writing.hasBaseline)
+	// The header must stay one line: writingChromeLines budgets exactly one
+	// for it, so a wrapped header pushes the textarea off the bottom.
+	header = truncateToWidth(header, m.width)
 	help := statStyle.Render("ctrl+n: new entry   ctrl+t: toggle size   esc: end session")
 	view := titleStyle.Render(header) + "\n\n" + m.writing.textarea.View() + "\n\n" + help
 	if m.writing.pasteWarning != "" {

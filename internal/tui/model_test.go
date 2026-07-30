@@ -71,6 +71,31 @@ func TestViewIncludesVersionFooter(t *testing.T) {
 	}
 }
 
+func TestKeyPressDismissesStaleError(t *testing.T) {
+	m := Model{screen: screenHome, err: errors.New("boom")}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+
+	if m.err != nil {
+		t.Fatalf("expected the error to be dismissed, got %v", m.err)
+	}
+	if strings.Contains(m.View(), "boom") {
+		t.Fatalf("expected the dismissed error to be gone from the view, got %q", m.View())
+	}
+}
+
+func TestNonKeyMessageKeepsErrorVisible(t *testing.T) {
+	m := Model{screen: screenHome, err: errors.New("boom")}
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+
+	if m.err == nil {
+		t.Fatal("expected a resize not to dismiss the error")
+	}
+}
+
 func TestWindowSizeMsgUpdatesModelDimensions(t *testing.T) {
 	m := Model{screen: screenHome}
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})

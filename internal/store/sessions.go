@@ -2,8 +2,17 @@ package store
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 )
+
+// timestamp renders a time for storage. Always UTC: every ORDER BY on these
+// columns is a lexicographic string sort, which mis-orders rows as soon as
+// two different UTC offsets are in play (travel, DST, or a mix of migrated
+// and fresh rows). Display converts back to local.
+func timestamp(t time.Time) string {
+	return t.UTC().Format(time.RFC3339)
+}
 
 type SessionRecord struct {
 	ID                 int64
@@ -17,7 +26,7 @@ type SessionRecord struct {
 func (s *Store) StartSession(now time.Time) (int64, error) {
 	res, err := s.db.Exec(
 		`INSERT INTO sessions (started_at, session_score, streak_bonus_applied) VALUES (?, 0, 1.0)`,
-		now.Format(time.RFC3339),
+		timestamp(now),
 	)
 	if err != nil {
 		return 0, err
@@ -28,9 +37,28 @@ func (s *Store) StartSession(now time.Time) (int64, error) {
 func (s *Store) SaveEntry(sessionID int64, createdAt time.Time, body string, wordCount int) error {
 	_, err := s.db.Exec(
 		`INSERT INTO entries (session_id, created_at, body, word_count) VALUES (?, ?, ?, ?)`,
-		sessionID, createdAt.Format(time.RFC3339), body, wordCount,
+		sessionID, timestamp(createdAt), body, wordCount,
 	)
 	return err
+}
+
+// DiscardSession removes a session and anything written under it. Used when
+// a session ends with nothing written, so opening the writing screen and
+// changing your mind doesn't leave an unfinished row behind forever.
+func (s *Store) DiscardSession(sessionID int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM entries WHERE session_id = ?`, sessionID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM sessions WHERE id = ?`, sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // FinishSession records the session's final score, then updates the
@@ -47,7 +75,7 @@ func (s *Store) FinishSession(sessionID int64, endedAt time.Time, sessionScore i
 
 	if _, err := tx.Exec(
 		`UPDATE sessions SET ended_at = ?, session_score = ?, streak_bonus_applied = ? WHERE id = ?`,
-		endedAt.Format(time.RFC3339), sessionScore, streakBonus, sessionID,
+		timestamp(endedAt), sessionScore, streakBonus, sessionID,
 	); err != nil {
 		return Stats{}, false, err
 	}
@@ -160,12 +188,21 @@ type SessionSearchResult struct {
 	Snippet string
 }
 
+// escapeLike neutralizes SQLite's LIKE wildcards so a query the user typed
+// is matched literally — without it, searching for "100%" or "foo_bar"
+// silently matches far more than the writer asked for. Pairs with the
+// `ESCAPE '\'` clause on every LIKE below.
+func escapeLike(query string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(query)
+}
+
 // SearchSessions returns finished sessions whose entry text matches query
 // (case-insensitive substring), most recent first, paginated by limit/offset.
 // An empty query matches every entry via SQL's `LIKE '%%'`, so the same
 // query shape handles both plain browsing and searching. total is the
 // number of matching sessions across all pages.
 func (s *Store) SearchSessions(query string, limit, offset int) ([]SessionSearchResult, int, error) {
+	pattern := escapeLike(query)
 	rows, err := s.db.Query(`
 		SELECT
 			s.id,
@@ -174,12 +211,12 @@ func (s *Store) SearchSessions(query string, limit, offset int) ([]SessionSearch
 			COALESCE((SELECT SUM(e.word_count) FROM entries e WHERE e.session_id = s.id), 0),
 			s.avg_pace_wpm,
 			s.peak_intensity_ratio,
-			(SELECT e.body FROM entries e WHERE e.session_id = s.id AND e.body LIKE '%' || ? || '%' ORDER BY e.created_at ASC LIMIT 1)
+			(SELECT e.body FROM entries e WHERE e.session_id = s.id AND e.body LIKE '%' || ? || '%' ESCAPE '\' ORDER BY e.created_at ASC LIMIT 1)
 		FROM sessions s
 		WHERE s.ended_at IS NOT NULL
-		  AND EXISTS (SELECT 1 FROM entries e WHERE e.session_id = s.id AND e.body LIKE '%' || ? || '%')
+		  AND EXISTS (SELECT 1 FROM entries e WHERE e.session_id = s.id AND e.body LIKE '%' || ? || '%' ESCAPE '\')
 		ORDER BY s.started_at DESC
-		LIMIT ? OFFSET ?`, query, query, limit, offset)
+		LIMIT ? OFFSET ?`, pattern, pattern, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -209,7 +246,7 @@ func (s *Store) SearchSessions(query string, limit, offset int) ([]SessionSearch
 		SELECT COUNT(*)
 		FROM sessions s
 		WHERE s.ended_at IS NOT NULL
-		  AND EXISTS (SELECT 1 FROM entries e WHERE e.session_id = s.id AND e.body LIKE '%' || ? || '%')`, query)
+		  AND EXISTS (SELECT 1 FROM entries e WHERE e.session_id = s.id AND e.body LIKE '%' || ? || '%' ESCAPE '\')`, pattern)
 	if err := row.Scan(&total); err != nil {
 		return nil, 0, err
 	}

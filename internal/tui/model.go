@@ -6,7 +6,7 @@ import (
 	"github.com/nd28/journal-tui/internal/store"
 )
 
-const Version = "0.2.1"
+const Version = "0.3.0"
 
 type screen int
 
@@ -55,6 +55,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if sizeMsg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = sizeMsg.Width
 		m.height = sizeMsg.Height
+	}
+
+	// Any keypress dismisses a stale error. Screen updates run after this,
+	// so an error raised by the very keypress that cleared the last one
+	// still shows.
+	if _, ok := msg.(tea.KeyMsg); ok {
+		m.err = nil
 	}
 
 	switch m.screen {

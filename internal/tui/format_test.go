@@ -1,12 +1,62 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
-func TestFormatSessionDateRendersHumanReadable(t *testing.T) {
-	got := formatSessionDate("2026-07-15T10:00:00Z")
-	want := "Jul 15, 2026 · 10:00 AM"
-	if got != want {
+func TestFormatSessionDateRendersHumanReadableInLocalTime(t *testing.T) {
+	const raw = "2026-07-15T10:00:00Z"
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	want := parsed.Local().Format("Jan 2, 2006 · 3:04 PM")
+	if got := formatSessionDate(raw); got != want {
 		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+// Timestamps written before the switch to UTC storage carry a local offset.
+// The same instant must render identically however it was stored, or history
+// would appear to shift when old and new rows sit side by side.
+func TestFormatSessionDateRendersEqualInstantsIdentically(t *testing.T) {
+	utc := formatSessionDate("2026-07-30T08:20:04Z")
+	offset := formatSessionDate("2026-07-30T13:50:04+05:30")
+	if utc != offset {
+		t.Fatalf("expected the same instant to render identically, got %q and %q", utc, offset)
+	}
+}
+
+func TestTruncateToWidthLeavesShortStringsAlone(t *testing.T) {
+	if got := truncateToWidth("Score: 10", 40); got != "Score: 10" {
+		t.Fatalf("expected the string unchanged, got %q", got)
+	}
+}
+
+func TestTruncateToWidthUnknownTerminalSizeLeavesStringAlone(t *testing.T) {
+	long := "Score: 1,240   Words: 210   Frantic   240 WPM · 6.2x"
+	if got := truncateToWidth(long, 0); got != long {
+		t.Fatalf("expected no truncation at unknown width, got %q", got)
+	}
+}
+
+func TestTruncateToWidthCutsToExactlyWidth(t *testing.T) {
+	got := truncateToWidth("abcdefghij", 5)
+	if want := "abcd…"; got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+	if n := len([]rune(got)); n != 5 {
+		t.Fatalf("expected exactly 5 columns, got %d", n)
+	}
+}
+
+func TestTruncateToWidthCountsRunesNotBytes(t *testing.T) {
+	// The combo bar and separator are multi-byte; truncating by byte would
+	// cut mid-rune and produce garbage.
+	got := truncateToWidth("████████ · Frantic", 10)
+	if n := len([]rune(got)); n != 10 {
+		t.Fatalf("expected exactly 10 runes, got %d in %q", n, got)
 	}
 }
 

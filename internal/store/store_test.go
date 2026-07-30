@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -493,5 +495,306 @@ func TestRecentAvgPaceExcludesSessionsWithoutRecordedPace(t *testing.T) {
 	want := (10.0 + 20.0 + 30.0) / 3.0
 	if avg != want {
 		t.Fatalf("expected avg %v (unrecorded session excluded), got %v", want, avg)
+	}
+}
+
+func TestOpenSetsOwnerOnlyFileMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "journal.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != dbFileMode {
+		t.Fatalf("expected journal file mode %o, got %o", dbFileMode, got)
+	}
+}
+
+func TestStoredTimestampsAreUTC(t *testing.T) {
+	s := openTestStore(t)
+	ist := time.FixedZone("IST", 5*3600+30*60)
+	local := time.Date(2026, 7, 30, 13, 50, 4, 0, ist)
+
+	id, err := s.StartSession(local)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := s.SaveEntry(id, local, "hello world", 2); err != nil {
+		t.Fatalf("SaveEntry: %v", err)
+	}
+	if _, _, err := s.FinishSession(id, local, 10, 1.0, 1, "2026-07-30"); err != nil {
+		t.Fatalf("FinishSession: %v", err)
+	}
+
+	results, _, err := s.SearchSessions("", 10, 0)
+	if err != nil {
+		t.Fatalf("SearchSessions: %v", err)
+	}
+	if want := "2026-07-30T08:20:04Z"; results[0].StartedAt != want {
+		t.Fatalf("expected started_at stored as %q, got %q", want, results[0].StartedAt)
+	}
+
+	entries, err := s.GetEntries(id)
+	if err != nil {
+		t.Fatalf("GetEntries: %v", err)
+	}
+	if want := "2026-07-30T08:20:04Z"; entries[0].CreatedAt != want {
+		t.Fatalf("expected created_at stored as %q, got %q", want, entries[0].CreatedAt)
+	}
+}
+
+func TestDiscardSessionRemovesSessionAndEntries(t *testing.T) {
+	s := openTestStore(t)
+	now := time.Now()
+
+	id, err := s.StartSession(now)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := s.SaveEntry(id, now, "stray text", 2); err != nil {
+		t.Fatalf("SaveEntry: %v", err)
+	}
+
+	if err := s.DiscardSession(id); err != nil {
+		t.Fatalf("DiscardSession: %v", err)
+	}
+
+	entries, err := s.GetEntries(id)
+	if err != nil {
+		t.Fatalf("GetEntries: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected entries to be removed, got %d", len(entries))
+	}
+
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE id = ?`, id).Scan(&count); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected the session row to be removed, got %d", count)
+	}
+}
+
+func TestSearchSessionsTreatsLikeWildcardsLiterally(t *testing.T) {
+	s := openTestStore(t)
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	today := base.Format("2006-01-02")
+
+	for i, body := range []string{"finished 100% of the plan", "nothing notable today"} {
+		startedAt := base.Add(time.Duration(i) * time.Hour)
+		id, err := s.StartSession(startedAt)
+		if err != nil {
+			t.Fatalf("StartSession: %v", err)
+		}
+		if err := s.SaveEntry(id, startedAt, body, 5); err != nil {
+			t.Fatalf("SaveEntry: %v", err)
+		}
+		if _, _, err := s.FinishSession(id, startedAt, 10, 1.0, 1, today); err != nil {
+			t.Fatalf("FinishSession: %v", err)
+		}
+	}
+
+	// Unescaped, "100%" would end up as LIKE '%100%%' and still match only
+	// the first entry — so assert on a bare "%", which unescaped matches
+	// every entry.
+	_, total, err := s.SearchSessions("%", 10, 0)
+	if err != nil {
+		t.Fatalf("SearchSessions: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("expected a literal %% to match only the one entry containing it, got %d", total)
+	}
+
+	_, total, err = s.SearchSessions("_", 10, 0)
+	if err != nil {
+		t.Fatalf("SearchSessions: %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("expected a literal _ to match nothing, got %d", total)
+	}
+}
+
+// makeLegacyDatabase writes a database in the shape the previous release
+// left behind: user_version 0, pace values derived from wall-clock duration
+// (one of them inflated by a clipboard paste), local-offset timestamps, and
+// sessions abandoned without writing anything.
+func makeLegacyDatabase(t *testing.T, path string) (finished, orphan, crashed int64) {
+	t.Helper()
+	ist := time.FixedZone("IST", 5*3600+30*60)
+	local := time.Date(2026, 7, 30, 13, 50, 4, 0, ist)
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	finished, err = s.StartSession(local)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := s.SaveEntry(finished, local, "a real session", 3); err != nil {
+		t.Fatalf("SaveEntry: %v", err)
+	}
+	if _, _, err := s.FinishSession(finished, local, 96716, 1.0, 1, "2026-07-30"); err != nil {
+		t.Fatalf("FinishSession: %v", err)
+	}
+	if err := s.RecordSessionPace(finished, 54.3, 662.4); err != nil {
+		t.Fatalf("RecordSessionPace: %v", err)
+	}
+
+	if orphan, err = s.StartSession(local); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	if crashed, err = s.StartSession(local); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := s.SaveEntry(crashed, local, "interrupted mid-session", 3); err != nil {
+		t.Fatalf("SaveEntry: %v", err)
+	}
+	s.Close()
+
+	// Roll the file back to how the previous release left it: schema
+	// unversioned, timestamps carrying the local offset.
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("raw open: %v", err)
+	}
+	defer raw.Close()
+	legacy := local.Format(time.RFC3339)
+	for _, stmt := range []struct {
+		q    string
+		args []any
+	}{
+		{`PRAGMA user_version = 0`, nil},
+		{`UPDATE sessions SET started_at = ?`, []any{legacy}},
+		{`UPDATE sessions SET ended_at = ? WHERE ended_at IS NOT NULL`, []any{legacy}},
+		{`UPDATE entries SET created_at = ?`, []any{legacy}},
+	} {
+		if _, err := raw.Exec(stmt.q, stmt.args...); err != nil {
+			t.Fatalf("legacy setup %q: %v", stmt.q, err)
+		}
+	}
+	return finished, orphan, crashed
+}
+
+func TestMigrationClearsLegacyPaceValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.db")
+	makeLegacyDatabase(t, path)
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open after legacy setup: %v", err)
+	}
+	defer s.Close()
+
+	results, _, err := s.SearchSessions("", 10, 0)
+	if err != nil {
+		t.Fatalf("SearchSessions: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 finished session, got %d", len(results))
+	}
+	if results[0].AvgPaceWPM != 0 || results[0].PeakIntensityRatio != 0 {
+		t.Fatalf("expected legacy pace values cleared, got %+v", results[0])
+	}
+	if _, ok, err := s.RecentAvgPace(10); err != nil || ok {
+		t.Fatalf("expected no baseline after clearing legacy pace data (ok=%v, err=%v)", ok, err)
+	}
+}
+
+func TestMigrationDeletesAbandonedSessionsButKeepsWriting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.db")
+	_, orphan, crashed := makeLegacyDatabase(t, path)
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open after legacy setup: %v", err)
+	}
+	defer s.Close()
+
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE id = ?`, orphan).Scan(&count); err != nil {
+		t.Fatalf("count orphan: %v", err)
+	}
+	if count != 0 {
+		t.Fatal("expected the abandoned, entry-less session to be deleted")
+	}
+
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE id = ?`, crashed).Scan(&count); err != nil {
+		t.Fatalf("count crashed: %v", err)
+	}
+	if count != 1 {
+		t.Fatal("expected an unfinished session that has entries to survive")
+	}
+}
+
+func TestMigrationRewritesLegacyTimestampsToUTC(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.db")
+	finished, _, _ := makeLegacyDatabase(t, path)
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open after legacy setup: %v", err)
+	}
+	defer s.Close()
+
+	const want = "2026-07-30T08:20:04Z"
+	var startedAt, endedAt string
+	if err := s.db.QueryRow(`SELECT started_at, ended_at FROM sessions WHERE id = ?`, finished).Scan(&startedAt, &endedAt); err != nil {
+		t.Fatalf("read session timestamps: %v", err)
+	}
+	if startedAt != want || endedAt != want {
+		t.Fatalf("expected both session timestamps rewritten to %q, got %q and %q", want, startedAt, endedAt)
+	}
+
+	entries, err := s.GetEntries(finished)
+	if err != nil {
+		t.Fatalf("GetEntries: %v", err)
+	}
+	if entries[0].CreatedAt != want {
+		t.Fatalf("expected entry timestamp rewritten to %q, got %q", want, entries[0].CreatedAt)
+	}
+}
+
+func TestMigrationRunsOnlyOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.db")
+	makeLegacyDatabase(t, path)
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	// Pace recorded under the new definition must survive a later Open —
+	// otherwise the one-time reset would wipe the baseline on every launch.
+	results, _, err := s.SearchSessions("", 10, 0)
+	if err != nil {
+		t.Fatalf("SearchSessions: %v", err)
+	}
+	id := results[0].ID
+	if err := s.RecordSessionPace(id, 48, 1.5); err != nil {
+		t.Fatalf("RecordSessionPace: %v", err)
+	}
+	s.Close()
+
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatalf("second Open: %v", err)
+	}
+	defer s2.Close()
+
+	results, _, err = s2.SearchSessions("", 10, 0)
+	if err != nil {
+		t.Fatalf("SearchSessions after reopen: %v", err)
+	}
+	if results[0].AvgPaceWPM != 48 || results[0].PeakIntensityRatio != 1.5 {
+		t.Fatalf("expected freshly recorded pace to survive reopen, got %+v", results[0])
 	}
 }
