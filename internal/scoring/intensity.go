@@ -108,6 +108,12 @@ const (
 // IntensityTier labels a pace ratio (live WPM / personal baseline WPM)
 // against fixed thresholds. An empty string means pace isn't notably
 // elevated.
+//
+// The empty string is load-bearing for the retrospective tag shown on the
+// Summary, History, and Read screens: sessions written before a baseline
+// existed store a peak ratio of 0, and those must stay untagged rather than
+// carrying a word on every row. The live writing header wants the opposite —
+// a word at every speed — so it uses LiveTier instead.
 func IntensityTier(ratio float64) string {
 	switch {
 	case ratio >= IntensityFranticRatio:
@@ -118,5 +124,56 @@ func IntensityTier(ratio float64) string {
 		return "Focused"
 	default:
 		return ""
+	}
+}
+
+// IntensityCruisingRatio separates ordinary writing pace from a warming-up or
+// winding-down one. It has no counterpart in IntensityTier, which only ever
+// labels elevated pace.
+const IntensityCruisingRatio = 0.7
+
+// Absolute words-per-minute thresholds used by LiveTier before a personal
+// baseline exists, so the live readout still says something in a writer's
+// first few sessions.
+const (
+	LiveWPMCruising = 20
+	LiveWPMFocused  = 40
+	LiveWPMIntense  = 60
+	LiveWPMFrantic  = 80
+)
+
+// LiveTier labels the current writing pace for the live header, and unlike
+// IntensityTier it always returns a word — a constant, glanceable signal is
+// the point, so there is no silent band. With a personal baseline it reads
+// the ratio; without one (the first few sessions, before enough pace history
+// exists) it falls back to absolute WPM using the same vocabulary. At session
+// start, with no words yet and a WPM of 0, that means "Warming".
+func LiveTier(wpm, ratio float64, hasBaseline bool) string {
+	if !hasBaseline {
+		switch {
+		case wpm >= LiveWPMFrantic:
+			return "Frantic"
+		case wpm >= LiveWPMIntense:
+			return "Intense"
+		case wpm >= LiveWPMFocused:
+			return "Focused"
+		case wpm >= LiveWPMCruising:
+			return "Cruising"
+		default:
+			return "Warming"
+		}
+	}
+
+	switch {
+	case ratio >= IntensityFranticRatio:
+		return "Frantic"
+	case ratio >= IntensityIntenseRatio:
+		return "Intense"
+	case ratio >= IntensityFocusedRatio:
+		return "Focused"
+	case ratio >= IntensityCruisingRatio:
+		return "Cruising"
+	default:
+		return "Warming"
 	}
 }

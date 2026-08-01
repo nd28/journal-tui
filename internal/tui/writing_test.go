@@ -236,13 +236,16 @@ func TestViewWritingShowsTierTagWhenElevated(t *testing.T) {
 	updated, _ := m.startWritingSession()
 	m = updated.(Model)
 
+	// hasBaseline has to be set alongside the ratio: without one the tier
+	// falls back to absolute WPM, where an untouched session reads 0.
+	m.writing.hasBaseline = true
 	m.writing.intensityRatio = scoring.IntensityIntenseRatio
 	if got := m.viewWriting(); !strings.Contains(got, "Intense") {
 		t.Fatalf("expected view to show the Intense tier tag, got %q", got)
 	}
 }
 
-func TestViewWritingHidesTierTagAtNormalPace(t *testing.T) {
+func TestViewWritingShowsCruisingTagAtNormalPace(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "journal.db"))
 	if err != nil {
@@ -257,9 +260,13 @@ func TestViewWritingHidesTierTagAtNormalPace(t *testing.T) {
 	updated, _ := m.startWritingSession()
 	m = updated.(Model)
 
+	m.writing.hasBaseline = true
+	m.writing.liveWPM = 45
+	m.writing.intensityRatio = 1.0
+
 	got := m.viewWriting()
-	if strings.Contains(got, "Focused") || strings.Contains(got, "Intense") || strings.Contains(got, "Frantic") {
-		t.Fatalf("expected no tier tag at normal pace, got %q", got)
+	if !strings.Contains(got, "Cruising") {
+		t.Fatalf("expected the Cruising tag at normal pace, got %q", got)
 	}
 }
 
@@ -288,6 +295,11 @@ func TestViewWritingShowsWPMOnlyWithoutBaseline(t *testing.T) {
 	}
 	if strings.Contains(got, "WPM ·") {
 		t.Fatalf("expected no ratio without a baseline, got %q", got)
+	}
+	// With no baseline the tier reads absolute speed instead: 42 WPM falls in
+	// the 40-60 band, so a word still accompanies the number.
+	if !strings.Contains(got, "Focused") {
+		t.Fatalf("expected the absolute-speed tier tag without a baseline, got %q", got)
 	}
 }
 
@@ -319,7 +331,7 @@ func TestViewWritingShowsRatioWithBaseline(t *testing.T) {
 	}
 }
 
-func TestViewWritingShowsRatioWithoutTierAtNormalPace(t *testing.T) {
+func TestViewWritingShowsRatioAndCruisingAtNormalPace(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "journal.db"))
 	if err != nil {
@@ -342,8 +354,11 @@ func TestViewWritingShowsRatioWithoutTierAtNormalPace(t *testing.T) {
 	if !strings.Contains(got, "28 WPM · 0.9x") {
 		t.Fatalf("expected WPM and ratio at normal pace, got %q", got)
 	}
+	if !strings.Contains(got, "Cruising") {
+		t.Fatalf("expected the Cruising tag at normal pace, got %q", got)
+	}
 	if strings.Contains(got, "Focused") || strings.Contains(got, "Intense") || strings.Contains(got, "Frantic") {
-		t.Fatalf("expected no tier tag at normal pace, got %q", got)
+		t.Fatalf("expected no elevated tier tag at normal pace, got %q", got)
 	}
 }
 

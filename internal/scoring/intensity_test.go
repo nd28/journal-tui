@@ -61,6 +61,11 @@ func TestIntensityTierThresholds(t *testing.T) {
 		ratio float64
 		want  string
 	}{
+		// The empty results are the contract the retrospective tag on the
+		// Summary, History, and Read screens depends on: a session with no
+		// notably elevated pace — including one recorded before a baseline
+		// existed, which stores a peak of 0 — must stay untagged. LiveTier
+		// is the one that always returns a word.
 		{0, ""},
 		{1.0, ""},
 		{1.29, ""},
@@ -75,6 +80,63 @@ func TestIntensityTierThresholds(t *testing.T) {
 		if got := IntensityTier(c.ratio); got != c.want {
 			t.Fatalf("IntensityTier(%v) = %q, want %q", c.ratio, got, c.want)
 		}
+	}
+}
+
+func TestLiveTierRatioBands(t *testing.T) {
+	cases := []struct {
+		ratio float64
+		want  string
+	}{
+		{0, "Warming"},
+		{0.69, "Warming"},
+		{0.7, "Cruising"},
+		{1.2, "Cruising"},
+		{1.3, "Focused"},
+		{1.79, "Focused"},
+		{1.8, "Intense"},
+		{2.5, "Frantic"},
+	}
+	for _, c := range cases {
+		// The WPM argument is ignored with a baseline present, so it's set to
+		// a value whose absolute band would disagree with the expected word.
+		if got := LiveTier(100, c.ratio, true); got != c.want {
+			t.Fatalf("LiveTier(100, %v, true) = %q, want %q", c.ratio, got, c.want)
+		}
+	}
+}
+
+func TestLiveTierAbsoluteBandsWithoutBaseline(t *testing.T) {
+	cases := []struct {
+		wpm  float64
+		want string
+	}{
+		{0, "Warming"},
+		{10, "Warming"},
+		{20, "Cruising"},
+		{39, "Cruising"},
+		{45, "Focused"},
+		{65, "Intense"},
+		{90, "Frantic"},
+	}
+	for _, c := range cases {
+		// The ratio argument is meaningless without a baseline, so it's set
+		// high enough to read as Frantic if it were wrongly consulted.
+		if got := LiveTier(c.wpm, 9, false); got != c.want {
+			t.Fatalf("LiveTier(%v, 9, false) = %q, want %q", c.wpm, got, c.want)
+		}
+	}
+}
+
+func TestLiveTierNeverEmpty(t *testing.T) {
+	// At session start nothing has been typed, so both inputs are zero. The
+	// header still has to carry a word, or the reading it replaced would
+	// blink in and out.
+	if got := LiveTier(0, 0, true); got != "Warming" {
+		t.Fatalf("LiveTier(0, 0, true) = %q, want %q", got, "Warming")
+	}
+	if got := LiveTier(0, 0, false); got != "Warming" {
+		t.Fatalf("LiveTier(0, 0, false) = %q, want %q", got, "Warming")
 	}
 }
 

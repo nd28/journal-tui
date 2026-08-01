@@ -6,7 +6,7 @@ import (
 	"github.com/nd28/journal-tui/internal/store"
 )
 
-const Version = "0.3.0"
+const Version = "0.4.0"
 
 type screen int
 

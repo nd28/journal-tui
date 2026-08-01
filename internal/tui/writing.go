@@ -354,9 +354,10 @@ func (m Model) viewWriting() string {
 		formatNumber(m.writing.session.TotalWords()),
 		renderComboBar(combo.Multiplier, 20),
 	)
-	if tier := scoring.IntensityTier(m.writing.intensityRatio); tier != "" {
-		header += "   " + tier
-	}
+	// LiveTier always returns a word, so this is unconditional: the
+	// qualitative reading is meant to be a constant presence beside the
+	// numbers rather than something that appears only during a fast burst.
+	header += "   " + scoring.LiveTier(m.writing.liveWPM, m.writing.intensityRatio, m.writing.hasBaseline)
 	header += "   " + formatPaceInfo(m.writing.liveWPM, m.writing.intensityRatio, m.writing.hasBaseline)
 	// The header must stay one line: writingChromeLines budgets exactly one
 	// for it, so a wrapped header pushes the textarea off the bottom.
