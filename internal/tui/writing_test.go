@@ -452,6 +452,14 @@ func TestEndWritingSessionRecordsPace(t *testing.T) {
 	if m.summary.peakIntensityRatio != 2.1 {
 		t.Fatalf("expected summary peak ratio 2.1, got %v", m.summary.peakIntensityRatio)
 	}
+	// The same median that gets persisted is what the summary reports, so the
+	// pace shown after a session matches the one folded into future baselines.
+	if !m.summary.hasSessionPace {
+		t.Fatal("expected the summary to carry a measured session pace")
+	}
+	if m.summary.sessionPaceWPM != 24 {
+		t.Fatalf("expected summary session pace 24 WPM, got %v", m.summary.sessionPaceWPM)
+	}
 
 	results, _, err := s.SearchSessions("", 10, 0)
 	if err != nil {

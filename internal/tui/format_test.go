@@ -125,3 +125,23 @@ func TestFormatPaceInfoRoundsWPMToWholeNumber(t *testing.T) {
 		t.Fatalf("expected rounded WPM, got %q", got)
 	}
 }
+
+func TestFormatSessionPaceWithoutBaselineShowsWPMOnly(t *testing.T) {
+	if got := formatSessionPace(46, 0, false); got != "Session pace:   46 WPM" {
+		t.Fatalf("expected WPM-only pace line, got %q", got)
+	}
+}
+
+func TestFormatSessionPaceWithBaselineShowsPeakRatio(t *testing.T) {
+	want := "Session pace:   46 WPM   ·   peak 1.2x your average"
+	if got := formatSessionPace(46, 1.24, true); got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestFormatSessionPaceAppendsTierWhenPeakElevated(t *testing.T) {
+	want := "Session pace:   46 WPM   ·   peak 2.1x your average (Intense)"
+	if got := formatSessionPace(46, 2.1, true); got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}

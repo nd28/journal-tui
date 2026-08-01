@@ -92,3 +92,24 @@ func formatPaceInfo(wpm, ratio float64, hasBaseline bool) string {
 	}
 	return fmt.Sprintf("%.0f WPM · %.1fx", wpm, ratio)
 }
+
+// formatSessionPace renders the Summary screen's pace line: the session's
+// representative WPM — the same median that becomes a future baseline — plus
+// the peak ratio once a baseline exists to measure against, and the tier word
+// when that peak was genuinely elevated.
+//
+// The WPM shows unconditionally, unlike the tier word, because it is the one
+// figure that means something on its own: without it a session that peaked
+// just below the tier threshold reported nothing at all about how fast it was
+// written.
+func formatSessionPace(wpm, peakRatio float64, hasBaseline bool) string {
+	line := fmt.Sprintf("Session pace:   %.0f WPM", wpm)
+	if !hasBaseline {
+		return line
+	}
+	line += fmt.Sprintf("   ·   peak %.1fx your average", peakRatio)
+	if tier := scoring.IntensityTier(peakRatio); tier != "" {
+		line += " (" + tier + ")"
+	}
+	return line
+}

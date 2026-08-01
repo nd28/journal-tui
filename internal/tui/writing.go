@@ -249,22 +249,23 @@ func (m Model) endWritingSession() (tea.Model, tea.Cmd) {
 	bonus := scoring.StreakBonus(m.writing.streakDays)
 	final := scoring.FinalScore(raw, m.writing.streakDays)
 
+	// The median of the pace readings taken while actually typing, not total
+	// words over wall-clock duration. The live readings this session's
+	// baseline will be compared against are burst measurements, so the
+	// baseline has to be one too; a wall-clock average counts every pause as
+	// slow writing and drags the baseline toward zero, which inflates every
+	// future ratio. With no readings at all the session was too short to
+	// measure, and both the stored columns and the summary report nothing
+	// rather than a pace of zero.
+	activePaceWPM, hasPace := m.writing.paceSampler.Median()
+
 	stats, isNewHigh, err := m.store.FinishSession(m.writing.sessionID, time.Now(), final, bonus, m.writing.streakDays, m.writing.entryDate)
 	if err != nil {
 		m.err = err
 	} else {
 		m.stats = stats
 
-		// Record the median of the pace readings taken while actually
-		// typing, not total words over wall-clock duration. The live
-		// readings this session's baseline will be compared against are
-		// burst measurements, so the baseline has to be one too; a
-		// wall-clock average counts every pause as slow writing and drags
-		// the baseline toward zero, which inflates every future ratio.
-		// With no readings at all the session was too short to measure —
-		// leave the columns NULL so it's excluded from the baseline rather
-		// than recorded as a pace of zero.
-		if activePaceWPM, ok := m.writing.paceSampler.Median(); ok {
+		if hasPace {
 			if err := m.store.RecordSessionPace(m.writing.sessionID, activePaceWPM, m.writing.peakIntensityRatio); err != nil {
 				m.err = err
 			}
@@ -278,6 +279,9 @@ func (m Model) endWritingSession() (tea.Model, tea.Cmd) {
 		totalWords:         totalWords,
 		isNewHigh:          isNewHigh,
 		peakIntensityRatio: m.writing.peakIntensityRatio,
+		sessionPaceWPM:     activePaceWPM,
+		hasSessionPace:     hasPace,
+		hasBaseline:        m.writing.hasBaseline,
 	}
 	m.screen = screenSummary
 	return m, nil

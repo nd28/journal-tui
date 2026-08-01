@@ -5,8 +5,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-
-	"github.com/nd28/journal-tui/internal/scoring"
 )
 
 type summaryState struct {
@@ -16,6 +14,15 @@ type summaryState struct {
 	totalWords         int
 	isNewHigh          bool
 	peakIntensityRatio float64
+
+	// sessionPaceWPM is the median of the readings taken while actually
+	// typing — the same figure recorded as this session's pace and folded
+	// into future baselines. hasSessionPace is false when the session was too
+	// short to sample any reading at all, in which case there is no pace to
+	// report rather than a pace of zero.
+	sessionPaceWPM float64
+	hasSessionPace bool
+	hasBaseline    bool
 }
 
 func (m Model) updateSummary(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -44,8 +51,8 @@ func (m Model) viewSummary() string {
 	b.WriteString(statStyle.Render(fmt.Sprintf("Streak bonus:   +%.0f%%", (m.summary.bonus-1)*100)) + "\n")
 	b.WriteString(statStyle.Render(fmt.Sprintf("Session score:  %s", formatNumber(m.summary.finalScore))) + "\n")
 	b.WriteString(statStyle.Render(fmt.Sprintf("Lifetime score: %s", formatNumber(m.stats.LifetimeScore))) + "\n")
-	if tier := scoring.IntensityTier(m.summary.peakIntensityRatio); tier != "" {
-		b.WriteString(statStyle.Render(fmt.Sprintf("Peak pace:      %s (%.1fx your recent average)", tier, m.summary.peakIntensityRatio)) + "\n")
+	if m.summary.hasSessionPace {
+		b.WriteString(statStyle.Render(formatSessionPace(m.summary.sessionPaceWPM, m.summary.peakIntensityRatio, m.summary.hasBaseline)) + "\n")
 	}
 	b.WriteString("\n" + statStyle.Render("enter: back to home") + "\n")
 	return b.String()
