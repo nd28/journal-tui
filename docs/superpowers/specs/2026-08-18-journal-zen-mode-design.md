@@ -111,9 +111,10 @@ The line is present in both states. When zen is off it is the only advertisement
 the preference gets on this screen; when zen is on it doubles as the way back.
 
 **Writing** drops the header line entirely — score, words, combo bar, tier word
-and pace all go. `writingChromeLines` drops by one so the editor gains that row
-rather than staring at a blank one, which means `writingDimensions` takes the zen
-flag. The help line stays, including the `saved` / `unsaved` marker: knowing
+and pace all go — along with the blank separator beneath the header, since a
+blank line where the header used to be is just as much a reminder of it. That is
+two of the six lines `writingChromeLines` budgets, so the editor gains two rows
+and `writingDimensions` takes the zen flag. The help line stays, including the `saved` / `unsaved` marker: knowing
 whether your words reached disk is honesty, not gamification, and the crash-safety
 work exists precisely so the writer never has to wonder.
 
