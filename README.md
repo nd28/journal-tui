@@ -21,6 +21,35 @@ journal
 
 Data is stored in a local SQLite file at `~/.journal/journal.db`.
 
+## Keys
+
+While writing:
+
+| Key | Does |
+| --- | --- |
+| `ctrl+n` | Finish the current entry and start a new one in the same session |
+| `ctrl+t` | Toggle between full-screen and compact editor size |
+| `esc` / `ctrl+d` | End the session and show the summary |
+| `ctrl+c` | End the session and quit |
+
+## Crash safety
+
+The editor autosaves every 5 seconds, and the writing screen says `saved` or
+`unsaved` so you never have to guess. If the app is killed mid-session — a
+crash, a closed terminal, a battery that runs out — the next launch offers
+the session back:
+
+```
+! Unfinished session — 1,240 words, Aug 17, 2026 · 9:04 PM
+
+> Resume Session
+```
+
+Resuming puts the text back in the editor and the score back on the header,
+then carries on. The combo multiplier restarts at 1.0x: it measures the last
+few seconds of typing, and the interruption ended those. Sessions that were
+opened but never written in are cleaned up silently instead of being offered.
+
 ## Develop
 
 ```

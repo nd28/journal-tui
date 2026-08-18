@@ -6,7 +6,7 @@ import (
 	"github.com/nd28/journal-tui/internal/store"
 )
 
-const Version = "0.5.0"
+const Version = "0.6.0"
 
 type screen int
 
@@ -31,6 +31,12 @@ type Model struct {
 
 	homeCursor int
 
+	// recovery is the most recent session the app was killed in the middle
+	// of, offered on the home menu; recoveryCount is how many are waiting in
+	// total. Nil when there is nothing to pick up.
+	recovery      *store.UnfinishedSession
+	recoveryCount int
+
 	writing writingState
 	summary summaryState
 	history historyState
@@ -44,7 +50,18 @@ func New(s *store.Store) (Model, error) {
 	if err != nil {
 		return Model{}, err
 	}
-	return Model{screen: screenHome, store: s, stats: stats}, nil
+	m := Model{screen: screenHome, store: s, stats: stats}
+	// Sessions opened and walked away from hold nothing worth recovering and
+	// would otherwise pile up forever, since nothing at runtime revisits an
+	// unfinished row. Sweep them first so what's left is only real writing.
+	if _, err := s.DiscardEmptyUnfinishedSessions(); err != nil {
+		return Model{}, err
+	}
+	m.refreshRecovery()
+	if m.err != nil {
+		return Model{}, m.err
+	}
+	return m, nil
 }
 
 func (m Model) Init() tea.Cmd {

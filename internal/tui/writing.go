@@ -24,6 +24,11 @@ type writingState struct {
 	entryDate     string
 	pasteWarning  string
 
+	// savedDraft is what the buffer held at the last autosave. Comparing
+	// against it keeps the periodic save from rewriting an unchanged draft
+	// every few seconds while the writer sits and thinks.
+	savedDraft string
+
 	baselineWPM        float64
 	hasBaseline        bool
 	liveWPM            float64
@@ -93,6 +98,27 @@ type comboTickMsg time.Time
 func comboTick() tea.Cmd {
 	return tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
 		return comboTickMsg(t)
+	})
+}
+
+// autosaveTickMsg carries the session it was armed for. A tick that outlives
+// its session (ended, then a new one started inside the same interval) would
+// otherwise land on the writing screen and re-arm itself there, leaving two
+// tickers running against one session — and one more for every restart.
+type autosaveTickMsg struct {
+	sessionID int64
+}
+
+// autosaveInterval is how often the in-progress buffer is mirrored to disk.
+// Nothing else writes text until the session ends, so this interval is
+// exactly how much writing a power cut can take — a sentence, not a session.
+// Long enough that a steady typist causes one small write per interval
+// rather than one per keystroke.
+const autosaveInterval = 5 * time.Second
+
+func autosaveTick(sessionID int64) tea.Cmd {
+	return tea.Tick(autosaveInterval, func(time.Time) tea.Msg {
+		return autosaveTickMsg{sessionID: sessionID}
 	})
 }
 
@@ -166,22 +192,7 @@ func (m Model) startWritingSession() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	ta := textarea.New()
-	ta.Placeholder = "Start writing..."
-	ta.ShowLineNumbers = false
-	// Prompt defaults to a 2-column "┃ " gutter that SetWidth reserves out
-	// of the content width. Clearing it removes that reservation so the
-	// textarea's content width matches writingDimensions exactly, and
-	// reclaims those columns for actual writing space.
-	ta.Prompt = ""
-	// The textarea binds ctrl+v to its own clipboard paste, which arrives as
-	// an internal message rather than a key event — so it slips straight past
-	// the tea.KeyMsg.Paste guard in updateWriting, which only ever sees
-	// terminal-driven bracketed pastes. Disable the binding at the source.
-	ta.KeyMap.Paste.SetEnabled(false)
-	w, h := writingDimensions(m.width, m.height, m.compactMode)
-	ta.SetWidth(w)
-	ta.SetHeight(h)
+	ta := newWritingTextarea(m.width, m.height, m.compactMode)
 	focusCmd := ta.Focus()
 
 	m.writing = writingState{
@@ -195,7 +206,137 @@ func (m Model) startWritingSession() (tea.Model, tea.Cmd) {
 		hasBaseline: hasBaseline,
 	}
 	m.screen = screenWriting
-	return m, tea.Batch(focusCmd, comboTick())
+	return m, tea.Batch(focusCmd, comboTick(), autosaveTick(sessionID))
+}
+
+// newWritingTextarea builds the editor for a writing session, sized for the
+// current terminal. Shared by a fresh session and a resumed one so both get
+// the same paste guards and the same line ceiling.
+func newWritingTextarea(termWidth, termHeight int, compact bool) textarea.Model {
+	ta := textarea.New()
+	ta.Placeholder = "Start writing..."
+	ta.ShowLineNumbers = false
+	// Prompt defaults to a 2-column "┃ " gutter that SetWidth reserves out
+	// of the content width. Clearing it removes that reservation so the
+	// textarea's content width matches writingDimensions exactly, and
+	// reclaims those columns for actual writing space.
+	ta.Prompt = ""
+	// The textarea binds ctrl+v to its own clipboard paste, which arrives as
+	// an internal message rather than a key event — so it slips straight past
+	// the tea.KeyMsg.Paste guard in updateWriting, which only ever sees
+	// terminal-driven bracketed pastes. Disable the binding at the source.
+	ta.KeyMap.Paste.SetEnabled(false)
+	// MaxHeight defaults to 99, and bubbles enforces it by silently swallowing
+	// the enter key once the buffer holds that many lines — a long session
+	// hits an invisible wall mid-thought with no way to tell why. Zero lifts
+	// the cap to bubbles' own 10,000-line ceiling, which is the real limit
+	// either way since SetValue never consulted MaxHeight.
+	ta.MaxHeight = 0
+	w, h := writingDimensions(termWidth, termHeight, compact)
+	ta.SetWidth(w)
+	ta.SetHeight(h)
+	return ta
+}
+
+// resumeWritingSession reopens a session the app was killed in the middle of:
+// the autosaved text goes back in the editor and the running score goes back
+// on the header, so an interrupted session continues instead of restarting.
+func (m Model) resumeWritingSession(u store.UnfinishedSession) (tea.Model, tea.Cmd) {
+	now := time.Now()
+	// The streak belongs to the day the writing is finished on — today — not
+	// to the day the interrupted session happened to start.
+	today := now.Format("2006-01-02")
+	newStreak := store.ComputeStreak(m.stats.LastEntryDate, today, m.stats.CurrentStreak)
+
+	draft, hasDraft, err := m.store.GetDraft(u.ID)
+	if err != nil {
+		m.err = err
+		return m, nil
+	}
+
+	baselineWPM, hasBaseline, err := m.store.RecentAvgPace(baselinePaceSessionWindow)
+	if err != nil {
+		m.err = err
+		return m, nil
+	}
+
+	priorWords, priorPoints := draft.TotalWords, draft.RawScore
+	if !hasDraft {
+		// A session interrupted before autosave existed, or before its first
+		// tick, has entries on disk but no recorded score. Credit those words
+		// at the base rate: it is the least they can have earned, and a
+		// header reading "Words: 50   Score: 0" looks like a bug rather than
+		// like history.
+		priorWords = u.SavedWords
+		priorPoints = u.SavedWords * scoring.BasePointsPerWord
+	}
+
+	ta := newWritingTextarea(m.width, m.height, m.compactMode)
+	if draft.Body != "" {
+		ta.SetValue(draft.Body)
+	}
+	focusCmd := ta.Focus()
+	// bubbles only scrolls its viewport to the cursor at the end of Update,
+	// so without one the recovered text renders from the top while the cursor
+	// sits at the bottom. An empty update settles the view before first paint.
+	ta, _ = ta.Update(nil)
+
+	m.writing = writingState{
+		textarea: ta,
+		session:  scoring.RestoreSession(now, priorWords, priorPoints),
+		// The recovered text was already scored once. Without seeding the
+		// high-water mark, every word of it would be paid for a second time.
+		lastWordCount: completedWords(draft.Body),
+		sessionID:     u.ID,
+		startedAt:     now,
+		streakDays:    newStreak,
+		entryDate:     today,
+		baselineWPM:   baselineWPM,
+		hasBaseline:   hasBaseline,
+		savedDraft:    draft.Body,
+	}
+	m.recovery = nil
+	m.recoveryCount = 0
+	m.homeCursor = 0
+	m.screen = screenWriting
+	return m, tea.Batch(focusCmd, comboTick(), autosaveTick(u.ID))
+}
+
+// saveDraft mirrors the in-progress buffer and the running score to disk.
+// This is the only thing standing between a hard kill and a lost session:
+// entry rows are written only when the writer asks for a new entry or ends
+// the session, and a power cut asks for neither.
+func (m *Model) saveDraft() {
+	body := m.writing.textarea.Value()
+	if err := m.store.SaveDraft(
+		m.writing.sessionID,
+		time.Now(),
+		body,
+		m.writing.session.RawScore(),
+		m.writing.session.TotalWords(),
+	); err != nil {
+		m.err = err
+		return
+	}
+	m.writing.savedDraft = body
+}
+
+// refreshRecovery reloads which interrupted session, if any, is waiting to be
+// picked up. Called at startup and whenever a session ends, so finishing one
+// recovered session surfaces the next instead of hiding it until restart.
+func (m *Model) refreshRecovery() {
+	sessions, err := m.store.UnfinishedSessions()
+	if err != nil {
+		m.err = err
+		return
+	}
+	m.recoveryCount = len(sessions)
+	if len(sessions) == 0 {
+		m.recovery = nil
+		return
+	}
+	newest := sessions[0]
+	m.recovery = &newest
 }
 
 // finalizeCurrentEntry closes out the in-progress entry: it finalizes the
@@ -229,6 +370,13 @@ func (m Model) endWritingSession() (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// The draft exists only to survive a crash. Its text now lives in an
+	// entry row, so leaving it behind would offer a finished session back as
+	// recoverable.
+	if err := m.store.DeleteDraft(m.writing.sessionID); err != nil {
+		m.err = err
+	}
+
 	totalWords := m.writing.session.TotalWords()
 	if totalWords == 0 && !savedEntry {
 		// Nothing was written, so the row StartSession inserted is noise.
@@ -240,6 +388,7 @@ func (m Model) endWritingSession() (tea.Model, tea.Cmd) {
 		if err := m.store.DiscardSession(m.writing.sessionID); err != nil {
 			m.err = err
 		}
+		m.refreshRecovery()
 		m.screen = screenHome
 		m.homeCursor = 0
 		return m, nil
@@ -283,6 +432,7 @@ func (m Model) endWritingSession() (tea.Model, tea.Cmd) {
 		hasSessionPace:     hasPace,
 		hasBaseline:        m.writing.hasBaseline,
 	}
+	m.refreshRecovery()
 	m.screen = screenSummary
 	return m, nil
 }
@@ -302,6 +452,18 @@ func (m Model) updateWriting(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, comboTick()
+	}
+
+	if tick, ok := msg.(autosaveTickMsg); ok {
+		if tick.sessionID != m.writing.sessionID {
+			// Left over from a session that already ended. Let it stop here
+			// instead of re-arming against a session it doesn't belong to.
+			return m, nil
+		}
+		if m.writing.textarea.Value() != m.writing.savedDraft {
+			m.saveDraft()
+		}
+		return m, autosaveTick(tick.sessionID)
 	}
 
 	if _, ok := msg.(tea.WindowSizeMsg); ok {
@@ -325,7 +487,12 @@ func (m Model) updateWriting(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.writing.pasteWarning = pasteWarningText
 			return m, nil
 		case "ctrl+c":
-			return m, tea.Quit
+			// This used to quit outright, dropping everything typed since
+			// the last new-entry keypress and leaving the session unfinished
+			// — so its writing never reached History and its score never
+			// counted. End it properly, then quit.
+			updated, _ := m.endWritingSession()
+			return updated, tea.Quit
 		case "esc", "ctrl+d":
 			return m.endWritingSession()
 		case "ctrl+n":
@@ -334,6 +501,10 @@ func (m Model) updateWriting(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.err = err
 				}
 			}
+			// The buffer is empty again but the score isn't. Rewrite the
+			// draft so a crash in the next few seconds restores the running
+			// total instead of double-counting the entry just saved.
+			m.saveDraft()
 			return m, nil
 		case "ctrl+t":
 			m.compactMode = !m.compactMode
@@ -348,6 +519,16 @@ func (m Model) updateWriting(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.writing.textarea, cmd = m.writing.textarea.Update(msg)
 	m.writing.lastWordCount = syncWordCount(m.writing.session, m.writing.lastWordCount, m.writing.textarea.Value(), time.Now())
 	return m, cmd
+}
+
+// writingSaveStatus reports whether what is on screen has reached disk yet.
+// The point of autosaving is that the writer never has to wonder, so the
+// answer belongs on screen rather than being left to trust.
+func writingSaveStatus(buffer, saved string) string {
+	if buffer == saved {
+		return "saved"
+	}
+	return "unsaved"
 }
 
 func (m Model) viewWriting() string {
@@ -366,7 +547,12 @@ func (m Model) viewWriting() string {
 	// The header must stay one line: writingChromeLines budgets exactly one
 	// for it, so a wrapped header pushes the textarea off the bottom.
 	header = truncateToWidth(header, m.width)
-	help := statStyle.Render("ctrl+n: new entry   ctrl+t: toggle size   esc: end session")
+	// The help line is truncated like the header: writingChromeLines budgets
+	// exactly one line for it, and a wrapped one pushes the textarea off the
+	// bottom of the screen.
+	helpText := "ctrl+n: new entry   ctrl+t: toggle size   esc: end session   ·   " +
+		writingSaveStatus(m.writing.textarea.Value(), m.writing.savedDraft)
+	help := statStyle.Render(truncateToWidth(helpText, m.width))
 	view := titleStyle.Render(header) + "\n\n" + m.writing.textarea.View() + "\n\n" + help
 	if m.writing.pasteWarning != "" {
 		view += "\n" + errorStyle.Render(m.writing.pasteWarning)
