@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nd28/journal-tui/internal/scoring"
+	"github.com/nd28/journal-tui/internal/store"
 )
 
 // formatSessionDate renders a stored RFC3339 timestamp as a human-readable
@@ -112,4 +113,17 @@ func formatSessionPace(wpm, peakRatio float64, hasBaseline bool) string {
 		line += " (" + tier + ")"
 	}
 	return line
+}
+
+// formatRecoveryNotice renders the home-screen line for writing left behind
+// when the app was killed mid-session. count is how many such sessions are
+// waiting; the words and date describe the most recent one, which is the one
+// the resume menu item opens.
+func formatRecoveryNotice(u store.UnfinishedSession, count int) string {
+	detail := formatCount(u.TotalWords(), "word", "words") + ", " + formatSessionDate(u.StartedAt)
+	if count > 1 {
+		return fmt.Sprintf("! %s unfinished — most recent %s",
+			formatCount(count, "session", "sessions"), detail)
+	}
+	return "! Unfinished session — " + detail
 }
