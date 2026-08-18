@@ -55,6 +55,9 @@ func (s *Store) DiscardSession(sessionID int64) error {
 	if _, err := tx.Exec(`DELETE FROM entries WHERE session_id = ?`, sessionID); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`DELETE FROM drafts WHERE session_id = ?`, sessionID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM sessions WHERE id = ?`, sessionID); err != nil {
 		return err
 	}

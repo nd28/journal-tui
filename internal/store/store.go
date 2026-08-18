@@ -28,6 +28,15 @@ CREATE TABLE IF NOT EXISTS entries (
 	word_count INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS drafts (
+	session_id INTEGER PRIMARY KEY REFERENCES sessions(id),
+	body TEXT NOT NULL,
+	body_words INTEGER NOT NULL,
+	raw_score INTEGER NOT NULL,
+	total_words INTEGER NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS stats (
 	id INTEGER PRIMARY KEY CHECK (id = 1),
 	lifetime_score INTEGER NOT NULL DEFAULT 0,
