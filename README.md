@@ -32,6 +32,20 @@ While writing:
 | `esc` / `ctrl+d` | End the session and show the summary |
 | `ctrl+c` | End the session and quit |
 
+Reading past sessions in History (and in the Read screen):
+
+| Key | Does |
+| --- | --- |
+| `enter` | Open the highlighted session |
+| `ctrl+s` | Copy the session to the clipboard, ready to paste and share |
+| `pgup` / `pgdn` | Page through results |
+| `esc` | Go back |
+
+A copied session carries its stat header — date, score, word count, intensity —
+followed by the entry text, unstyled so it wraps to whatever you paste it into.
+On a machine with no clipboard tool (a bare SSH session, say), the copy reports
+an error rather than quietly copying nothing.
+
 ## Crash safety
 
 The editor autosaves every 5 seconds, and the writing screen says `saved` or

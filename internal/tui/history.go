@@ -69,6 +69,17 @@ func (m Model) updateHistory(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screenHome
 		m.homeCursor = 0
 		return m, nil
+	case tea.KeyCtrlS:
+		if len(m.history.results) == 0 {
+			return m, nil
+		}
+		session := m.history.results[m.history.cursor]
+		entries, err := m.store.GetEntries(session.ID)
+		if err != nil {
+			m.err = err
+			return m, nil
+		}
+		return m.shareSession(session, entries)
 	case tea.KeyEnter:
 		if len(m.history.results) == 0 {
 			return m, nil
@@ -140,6 +151,6 @@ func (m Model) viewHistory() string {
 		to = from + len(m.history.results) - 1
 	}
 	b.WriteString("\n" + statStyle.Render(fmt.Sprintf("showing %d-%d of %d", from, to, m.history.total)) + "\n")
-	b.WriteString(statStyle.Render("enter: read   pgup/pgdn: page   esc: back to home"))
+	b.WriteString(statStyle.Render("enter: read   ctrl+s: copy   pgup/pgdn: page   esc: back to home"))
 	return b.String()
 }

@@ -6,7 +6,7 @@ import (
 	"github.com/nd28/journal-tui/internal/store"
 )
 
-const Version = "0.6.1"
+const Version = "0.7.0"
 
 type screen int
 
@@ -41,6 +41,11 @@ type Model struct {
 	summary summaryState
 	history historyState
 	read    readState
+
+	// shareStatus confirms a copy to the clipboard. Like err it is cleared
+	// by the next keypress, so it lingers exactly as long as the writer is
+	// still looking at the screen they pressed the key on.
+	shareStatus string
 
 	err error
 }
@@ -79,6 +84,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// still shows.
 	if _, ok := msg.(tea.KeyMsg); ok {
 		m.err = nil
+		m.shareStatus = ""
 	}
 
 	switch m.screen {
@@ -109,6 +115,9 @@ func (m Model) View() string {
 		body = m.viewHistory()
 	case screenRead:
 		body = m.viewRead()
+	}
+	if m.shareStatus != "" {
+		body += "\n" + statStyle.Render(m.shareStatus)
 	}
 	if m.err != nil {
 		body += "\n" + errorStyle.Render("Error: "+m.err.Error())

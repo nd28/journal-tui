@@ -97,6 +97,8 @@ func (m Model) updateRead(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEsc:
 			m.screen = screenHistory
 			return m, nil
+		case tea.KeyCtrlS:
+			return m.shareSession(m.read.session, m.read.entries)
 		}
 	}
 	var cmd tea.Cmd
@@ -115,6 +117,6 @@ func (m Model) viewRead() string {
 		formatIntensityTag(m.read.session.PeakIntensityRatio),
 	)) + "\n\n")
 	b.WriteString(m.read.viewport.View() + "\n")
-	b.WriteString(statStyle.Render("up/down/pgup/pgdn: scroll   esc: back to history"))
+	b.WriteString(statStyle.Render("up/down/pgup/pgdn: scroll   ctrl+s: copy   esc: back to history"))
 	return b.String()
 }
