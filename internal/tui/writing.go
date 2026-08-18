@@ -480,22 +480,40 @@ func (m Model) updateWriting(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.writing.pasteWarning = ""
 
-		switch keyMsg.String() {
-		case "ctrl+v":
+		// bubbletea coalesces the runes it reads in one go into a single
+		// KeyMsg, and Key.String() renders that run as a plain string — so a
+		// message carrying the typed letters "up" is indistinguishable from
+		// the up-arrow key, and one carrying "esc" from escape. Both bubbles'
+		// key bindings and the switch below match on that string, so typing
+		// "up" moved the cursor instead of writing the word, and typing "esc"
+		// mid-sentence ended the session. A run of more than one rune is
+		// always text a person typed, never a key they pressed: insert it
+		// directly and let no binding look at it.
+		if keyMsg.Type == tea.KeyRunes && len(keyMsg.Runes) > 1 {
+			m.writing.textarea.InsertString(string(keyMsg.Runes))
+			m.writing.lastWordCount = syncWordCount(
+				m.writing.session, m.writing.lastWordCount, m.writing.textarea.Value(), time.Now())
+			return m, nil
+		}
+
+		// Matched on Type rather than String() for the same reason, and to
+		// match how updateHistory reads keys.
+		switch keyMsg.Type {
+		case tea.KeyCtrlV:
 			// The textarea's own paste binding is disabled, so this key
 			// would otherwise do nothing silently. Say why.
 			m.writing.pasteWarning = pasteWarningText
 			return m, nil
-		case "ctrl+c":
+		case tea.KeyCtrlC:
 			// This used to quit outright, dropping everything typed since
 			// the last new-entry keypress and leaving the session unfinished
 			// — so its writing never reached History and its score never
 			// counted. End it properly, then quit.
 			updated, _ := m.endWritingSession()
 			return updated, tea.Quit
-		case "esc", "ctrl+d":
+		case tea.KeyEsc, tea.KeyCtrlD:
 			return m.endWritingSession()
-		case "ctrl+n":
+		case tea.KeyCtrlN:
 			if body, words, ok := m.writing.finalizeCurrentEntry(); ok {
 				if err := m.store.SaveEntry(m.writing.sessionID, time.Now(), body, words); err != nil {
 					m.err = err
@@ -506,7 +524,7 @@ func (m Model) updateWriting(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// total instead of double-counting the entry just saved.
 			m.saveDraft()
 			return m, nil
-		case "ctrl+t":
+		case tea.KeyCtrlT:
 			m.compactMode = !m.compactMode
 			w, h := writingDimensions(m.width, m.height, m.compactMode)
 			m.writing.textarea.SetWidth(w)
