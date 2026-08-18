@@ -80,3 +80,43 @@ func TestCompleteWordFeedsPaceTracker(t *testing.T) {
 		t.Fatalf("expected Session.CompleteWord to feed Pace, got %v WPM", got)
 	}
 }
+
+func TestRestoreSessionSeedsPriorWorkWithoutTheCombo(t *testing.T) {
+	now := time.Now()
+	s := RestoreSession(now, 120, 4200)
+
+	if got := s.TotalWords(); got != 120 {
+		t.Fatalf("expected 120 restored words, got %d", got)
+	}
+	if got := s.RawScore(); got != 4200 {
+		t.Fatalf("expected 4200 restored points, got %d", got)
+	}
+	if s.Combo.Multiplier != ComboFloor {
+		t.Fatalf("expected the combo to restart at the floor, got %v", s.Combo.Multiplier)
+	}
+}
+
+func TestRestoreSessionAddsNewWritingOnTopOfPriorWork(t *testing.T) {
+	now := time.Now()
+	s := RestoreSession(now, 10, 100)
+	s.CompleteWord(now)
+
+	if got := s.TotalWords(); got != 11 {
+		t.Fatalf("expected the new word to add to the restored count, got %d", got)
+	}
+	if got := s.RawScore(); got <= 100 {
+		t.Fatalf("expected the new word to add points on top of %d, got %d", 100, got)
+	}
+}
+
+func TestRestoreSessionWithNothingPriorBehavesLikeANewSession(t *testing.T) {
+	now := time.Now()
+	s := RestoreSession(now, 0, 0)
+
+	if s.TotalWords() != 0 || s.RawScore() != 0 {
+		t.Fatalf("expected an empty restored session, got words=%d score=%d", s.TotalWords(), s.RawScore())
+	}
+	if len(s.Entries) != 0 {
+		t.Fatalf("expected no placeholder entry when there is nothing to restore, got %d", len(s.Entries))
+	}
+}

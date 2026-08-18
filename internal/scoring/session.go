@@ -31,6 +31,24 @@ func NewSession(now time.Time) *Session {
 	return &Session{Combo: NewCombo(now)}
 }
 
+// RestoreSession rebuilds a session that was interrupted mid-write, seeding
+// it with the words and points it had already earned so the writer picks up
+// from their running score rather than from zero. The prior work is folded
+// into one finalized entry: only the totals were ever persisted, and only
+// the totals are ever read back out.
+//
+// The combo deliberately restarts at the floor. It measures the rhythm of
+// the last few seconds of typing, and the interruption ended that rhythm —
+// restoring a 4x multiplier would hand out points for momentum that no
+// longer exists.
+func RestoreSession(now time.Time, priorWords, priorPoints int) *Session {
+	s := NewSession(now)
+	if priorWords > 0 || priorPoints > 0 {
+		s.Entries = append(s.Entries, Entry{Words: priorWords, Points: priorPoints})
+	}
+	return s
+}
+
 // CompleteWord registers a completed word in the current (in-progress) entry.
 func (s *Session) CompleteWord(now time.Time) {
 	points := s.Combo.CompleteWord(now)
