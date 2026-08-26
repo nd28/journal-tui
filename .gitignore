@@ -2,3 +2,10 @@
 /journal
 *.db
 *.sqlite
+
+/.claude/
+/writestreak.bin
+
+# Saarthi collections discovery doc — unrelated to journal, kept here only
+# because this is where it was written.
+/to-questionnaire-lms-saarthi-collections.md
