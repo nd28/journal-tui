@@ -19,7 +19,43 @@ Requires Go 1.25+. This installs a `journal` binary to `$(go env GOPATH)/bin`
 journal
 ```
 
-Data is stored in a local SQLite file at `~/.journal/journal.db`.
+Data is stored in a local SQLite file at `~/.journal/journal.db`. Set
+`JOURNAL_DB` to keep it somewhere else, or to keep a second journal apart
+from the daily one.
+
+## Commands
+
+Bare `journal` opens the app. Everything else works without a terminal, so
+scripts and agents can read and write the journal directly:
+
+```
+journal add [text]         Record an entry (reads stdin if no text given)
+journal list [flags]       List finished sessions, newest first
+journal show <id> [flags]  Print one session's entries
+journal stats [flags]      Lifetime score, high score, streak
+journal version
+journal help
+```
+
+`--json` switches `list`, `show`, `stats`, and `add` to machine-readable
+output; `list` also takes `--limit`, `--offset`, and `--query`. Exit status
+is 0 on success, 1 on failure, 2 on a malformed invocation.
+
+```
+$ echo "the fog came in on little cat feet" | journal add -
+saved session 79 - 8 words (unscored)
+
+$ journal list --json --query fog | jq '.sessions[0].id'
+79
+```
+
+**Entries added this way score zero, and don't touch the streak.** The
+writing screen blocks paste for a reason - the combo multiplier measures
+typing rhythm over the last few seconds, and text arriving through a pipe
+has no rhythm to measure. There's no honest score to award it, and awarding
+one anyway would turn the lifetime score into a number any loop could
+inflate. Piped entries are readable in history like any other; they just
+don't count toward the game.
 
 ## Keys
 
@@ -70,3 +106,6 @@ make test    # go build + go vet + go test ./...
 make run     # build and run
 make install # go install ./cmd/journal
 ```
+
+`JOURNAL_DB` is what makes the CLI testable: point it at a temp file and a
+test gets its own journal instead of fighting over the one in `$HOME`.

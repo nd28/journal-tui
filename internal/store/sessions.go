@@ -295,3 +295,78 @@ func (s *Store) GetEntries(sessionID int64) ([]EntryRecord, error) {
 	}
 	return out, rows.Err()
 }
+
+// GetSession returns one session's stats row by ID. found is false when no
+// such session exists, which callers report as "not found" rather than as a
+// database error.
+func (s *Store) GetSession(id int64) (rec SessionRecord, found bool, err error) {
+	var avgPace, peakRatio sql.NullFloat64
+	row := s.db.QueryRow(`
+		SELECT
+			s.id,
+			s.started_at,
+			s.session_score,
+			COALESCE((SELECT SUM(e.word_count) FROM entries e WHERE e.session_id = s.id), 0),
+			s.avg_pace_wpm,
+			s.peak_intensity_ratio
+		FROM sessions s
+		WHERE s.id = ?`, id)
+	switch err := row.Scan(&rec.ID, &rec.StartedAt, &rec.SessionScore, &rec.WordCount, &avgPace, &peakRatio); {
+	case err == sql.ErrNoRows:
+		return SessionRecord{}, false, nil
+	case err != nil:
+		return SessionRecord{}, false, err
+	}
+	rec.AvgPaceWPM = avgPace.Float64
+	rec.PeakIntensityRatio = peakRatio.Float64
+	return rec, true, nil
+}
+
+// AddUnscoredSession records a complete session in one shot: a session row,
+// a single entry under it, and an ended_at — with a score of zero and no
+// change to lifetime score, high score, or streak.
+//
+// The zero is the point. The writing screen blocks paste outright ("write it
+// yourself"), and the combo multiplier that drives scoring measures typing
+// rhythm over the last few seconds. Text that arrives through a pipe has no
+// rhythm to measure, so there is no honest score to award it — and awarding
+// one would make the lifetime score a number anything could inflate. Entries
+// added this way are readable in history like any other; they just don't
+// count toward the game.
+func (s *Store) AddUnscoredSession(now time.Time, body string, wordCount int) (sessionID, entryID int64, err error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+
+	at := timestamp(now)
+	res, err := tx.Exec(
+		`INSERT INTO sessions (started_at, ended_at, session_score, streak_bonus_applied) VALUES (?, ?, 0, 1.0)`,
+		at, at,
+	)
+	if err != nil {
+		return 0, 0, err
+	}
+	sessionID, err = res.LastInsertId()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	res, err = tx.Exec(
+		`INSERT INTO entries (session_id, created_at, body, word_count) VALUES (?, ?, ?, ?)`,
+		sessionID, at, body, wordCount,
+	)
+	if err != nil {
+		return 0, 0, err
+	}
+	entryID, err = res.LastInsertId()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	return sessionID, entryID, nil
+}
